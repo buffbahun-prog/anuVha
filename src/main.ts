@@ -1,7 +1,6 @@
 // ===================== IMPORTS =====================
 //import "./style.css";
 import QRCode from "qrcode";
-import { compressSync, decompressSync } from "fflate";
 
 import {
   compressEncryptSign,
@@ -14,7 +13,9 @@ import {
   arrayBufferToBase64,
   base64ToArrayBuffer,
   base64ToUint8,
+  compressJSON,
   cryptoKeyToBase64,
+  decompressJSON,
   formatFileSize,
   getFileCategory,
   getUploadSpeed,
@@ -30,7 +31,9 @@ import { ConnectionType, PeerType, ViewPage } from "./types";
 
 // ===================== CONFIG =====================
 const config: RTCConfiguration = {
-  // iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  iceServers: [
+    // { urls: "stun:stun.l.google.com:19302" }
+  ]
 };
 
 const CHUNK_SIZE = 16 * 1024;
@@ -93,23 +96,13 @@ const peerPauseBar = document.getElementById("peerPauseBar") as HTMLDivElement;
 const peerPauseTextElm = document.getElementById("peerPauseText") as HTMLDivElement;
 
 // ===================== UTIL =====================
-const splitBuffer = (buffer: ArrayBuffer) => {
-  const chunks: ArrayBuffer[] = [];
-  for (let i = 0; i < buffer.byteLength; i += CHUNK_SIZE) {
-    chunks.push(buffer.slice(i, i + CHUNK_SIZE));
-  }
-  return chunks;
-};
-
-const compress = (data: any): string => {
-  const bytes = new TextEncoder().encode(JSON.stringify(data));
-  return btoa(String.fromCharCode(...compressSync(bytes)));
-};
-
-const decompress = (base64: string) => {
-  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-  return JSON.parse(new TextDecoder().decode(decompressSync(bytes)));
-};
+// const splitBuffer = (buffer: ArrayBuffer) => {
+//   const chunks: ArrayBuffer[] = [];
+//   for (let i = 0; i < buffer.byteLength; i += CHUNK_SIZE) {
+//     chunks.push(buffer.slice(i, i + CHUNK_SIZE));
+//   }
+//   return chunks;
+// };
 
 const showQR = (data: string) => {
   QRCode.toCanvas(canvas, data, { errorCorrectionLevel: "L" });
@@ -351,8 +344,9 @@ async function startSender() {
   };
 
   pc.onicecandidate = async (e) => {
-    console.log("here", e.candidate);
-    if (!e.candidate) showQR(compress({ sdp: pc.localDescription }));
+    if (!e.candidate) {
+      showQR(compressJSON({ sdp: pc.localDescription }));
+    }
   };
 
   await pc.setLocalDescription(await pc.createOffer());
@@ -521,9 +515,7 @@ async function startReceiver() {
     };
   };
   pc.onicecandidate = async (e) => {
-    if (!e.candidate) {
-      showQR(compress({ sdp: pc.localDescription }));
-    }
+    if (!e.candidate) showQR(compressJSON({ sdp: pc.localDescription }));
   };
 }
 
@@ -543,11 +535,11 @@ async function setupFinalDownload(filesInfo: FileInfo[], opfsRoot: FileSystemDir
     };
 }
 
-function clearScan() {
-  (videoScanner.srcObject as MediaStream)?.getTracks().forEach(t => t.stop());
-  videoScanner.srcObject = null;
-  canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-}
+// function clearScan() {
+//   (videoScanner.srcObject as MediaStream)?.getTracks().forEach(t => t.stop());
+//   videoScanner.srcObject = null;
+//   canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+// }
 
 function stopCamera() {
   (videoScanner.srcObject as MediaStream)?.getTracks().forEach(t => t.stop());
@@ -890,7 +882,7 @@ async function startScan() {
 
   scanQR(video, async (data) => {
     console.log("here");
-    await pc.setRemoteDescription(decompress(data).sdp);
+    await pc.setRemoteDescription(decompressJSON(data).sdp);
     console.log("here too");
     isQrScanned = true;
     if (peerType === PeerType.Reciever) {

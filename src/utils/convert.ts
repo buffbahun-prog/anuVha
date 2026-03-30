@@ -1,3 +1,5 @@
+import { compressSync, decompressSync } from "fflate";
+
 export type Sample = { time: number; bytes: number };
 
 // ====== UTILITIES ======
@@ -46,31 +48,6 @@ export async function importECDSAPublicKey(base64: string) {
     ["verify"]
   );
 }
-
-// export async function base64ToCryptoKey(
-//   base64: string,
-//   usages: KeyUsage[]
-// ): Promise<CryptoKey> {
-
-//   // Base64 → ArrayBuffer
-//   const binary = atob(base64);
-//   const bytes = new Uint8Array(binary.length);
-//   for (let i = 0; i < binary.length; i++) {
-//     bytes[i] = binary.charCodeAt(i);
-//   }
-
-//   // Import key
-//   return await crypto.subtle.importKey(
-//     "spki",
-//     bytes.buffer,
-//     {
-//     name: "ECDH",
-//     namedCurve: "P-256"
-//   },
-//     true,
-//     usages
-//   );
-// }
 
 export function base64ToArrayBuffer(base64: string): ArrayBuffer {
   const binary = atob(base64);
@@ -153,4 +130,45 @@ export function getFileCategory(file?: File, type?: string) {
   if (type.includes("zip") || type.includes("rar")) return "Archive";
   if (type.includes("text")) return "Text";
   return "File";
+}
+
+export const compressJSON = (data: any): string => {
+  const bytes = new TextEncoder().encode(JSON.stringify(data));
+  return btoa(String.fromCharCode(...compressSync(bytes)));
+};
+
+export const decompressJSON = (base64: string) => {
+  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(decompressSync(bytes)));
+};
+
+export const encodeSDP = (sdp: string, type: RTCSdpType) => {
+  // 1. Convert string → bytes
+  const sdpBytes = new TextEncoder().encode(sdp);
+
+  // 2. Compress
+  const compressed = compressSync(sdpBytes);
+
+  // 3. Add 1-byte header (0 = offer, 1 = answer)
+  const payload = new Uint8Array(1 + compressed.length);
+  payload[0] = type === "offer" ? 0 : 1;
+  payload.set(compressed, 1);
+
+  return payload;
+}
+
+export const decodeSDP = (payload: Uint8Array<ArrayBuffer>) => {
+  // 1. Extract type
+  const type = payload[0] === 0 ? "offer" : "answer";
+
+  // 2. Extract compressed data
+  const compressed = payload.slice(1);
+
+  // 3. Decompress
+  const sdpBytes = decompressSync(compressed);
+
+  // 4. Convert back to string
+  const sdp = new TextDecoder().decode(sdpBytes);
+
+  return { type, sdp };
 }
