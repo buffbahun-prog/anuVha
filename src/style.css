@@ -1,0 +1,272 @@
+/* ===================== 1. VARIABLES & RESET ===================== */
+:root {
+  --primary: #22d3ee;
+  --primary-glow: rgba(34, 211, 238, 0.4);
+  --primary-strong: #08555f;
+  --bg-main: #020617;
+  --bg-card: rgba(15, 23, 42, 0.5);
+  --bg-subcard: #151923;
+  --border-glass: rgba(34, 211, 238, 0.3);
+  --border-dark: #282b3a;
+  --danger: #ef4444;
+  --text-muted: #6c7280;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', -apple-system, sans-serif; /* Modern stack */
+}
+
+body {
+  height: 100dvh;
+  color: white;
+  background: var(--bg-main);
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Background Grid & Glow Overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(34, 211, 238, 0.1), transparent 70%),
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px), 
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 100% 100%, 40px 40px, 40px 40px;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* ===================== 2. NAVIGATION ===================== */
+nav {
+  padding: 0.8em 1.2em;
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-glass);
+  z-index: 100;
+}
+
+nav img { width: 3em; height: 3em; }
+nav h1 { font-size: 1em; margin-left: 1em; letter-spacing: 1px; }
+
+.state-info {
+  margin-left: auto;
+  text-transform: uppercase;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+/* ===================== 3. CONTAINERS & CARDS ===================== */
+.main-cont {
+  padding: 4em 1em 2em;
+  max-width: 500px; /* Mobile optimized */
+  margin: 0 auto;
+}
+
+.card {
+  background: var(--bg-card);
+  backdrop-filter: blur(15px);
+  border: 1px solid var(--border-glass);
+  border-radius: 20px;
+  padding: 25px 18px;
+  position: relative;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.sub-card {
+  background: var(--bg-subcard);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px;
+  gap: 8px;
+}
+
+/* ===================== 4. INTERACTIVE ELEMENTS ===================== */
+.conn-type {
+  display: flex;
+  padding: 4px;
+  margin-bottom: 1.2em;
+  background: var(--bg-card);
+  border: 1px solid var(--border-dark);
+  border-radius: 14px;
+}
+
+.conn-type > div {
+  flex: 1;
+  padding: 10px;
+  text-align: center;
+  border-radius: 10px;
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.conn-type > div.selected {
+  background: var(--primary);
+  color: #151923;
+  box-shadow: 0 0 15px var(--primary-glow);
+}
+
+/* Node List Style */
+.node-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.node-list > li {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-dark);
+  border-radius: 18px;
+  padding: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: transform 0.2s;
+}
+
+.node-list > li:active { transform: scale(0.98); }
+
+/* ===================== 5. UPLOAD & TRANSFER UI ===================== */
+.file-upload-cont {
+  background: rgba(255, 255, 255, 0.02);
+  border: 2px dashed var(--border-dark);
+  border-radius: 20px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.has-file .file-upload-cont {
+  padding: 15px;
+  border-style: solid;
+  border-width: 1px;
+}
+
+.selection-summary {
+  display: none;
+  background: rgba(34, 211, 238, 0.05);
+  border-radius: 12px;
+  padding: 12px 20px;
+  margin: 15px 0;
+  border: 1px solid rgba(34, 211, 238, 0.1);
+  justify-content: space-between;
+}
+
+.has-file .selection-summary { display: flex; }
+
+#localFileList {
+  max-height: 25vh;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+#localFileList > li {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border-dark);
+  border-radius: 14px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* ===================== 6. BUTTONS & ACTIONS ===================== */
+.transfer-action, .next-btn {
+  width: 100%;
+  padding: 14px;
+  background: var(--primary);
+  border: none;
+  border-radius: 12px;
+  color: #151923;
+  font-weight: 700;
+  font-size: 1.1em;
+  cursor: pointer;
+  transition: 0.3s;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.next-btn { opacity: 0.3; cursor: not-allowed; }
+.has-file .next-btn { opacity: 1; cursor: pointer; }
+
+.back-btn {
+  position: absolute;
+  top: -45px;
+  left: 0;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 8px 16px;
+  border-radius: 12px;
+  color: var(--primary);
+  font-size: 0.9em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* ===================== 7. ANIMATIONS ===================== */
+.animate-home-in { animation: homeIn 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+.animate-view-in { animation: viewIn 0.5s ease-out forwards; }
+
+@keyframes homeIn {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes viewIn {
+  from { opacity: 0; filter: blur(10px); }
+  to { opacity: 1; filter: blur(0); }
+}
+
+.shimmer { position: relative; overflow: hidden; }
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+  transform: translateX(-100%);
+  animation: shimmerAnim 3s infinite;
+}
+
+@keyframes shimmerAnim {
+  100% { transform: translateX(100%); }
+}
+
+/* Peer Pause Overlay */
+#peerPauseBar {
+  position: absolute;
+  top: 0; left: 0; width: 100%;
+  padding: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  border-radius: 20px 20px 0 0;
+}
+
+#peerPauseBar.show-peer-pause { display: flex; }
+
+/* Status Utilities */
+.hidden { display: none !important; }
+.text-primary { color: var(--primary); }
