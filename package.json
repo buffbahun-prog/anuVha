@@ -17,7 +17,10 @@
   "dependencies": {
     "@asaltsberg/qr-scanner-byte-mode": "^2.2.0",
     "@vitejs/plugin-basic-ssl": "^2.2.0",
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "^0.21.3",
     "fflate": "^0.8.2",
+    "html5-qrcode": "^2.3.8",
     "qrcode": "^1.5.4",
     "three": "^0.183.2"
   }

@@ -1,56 +1,19 @@
 // ===================== IMPORTS =====================
 //import "./style.css";
 import QRCode from "qrcode";
+import { BrowserQRCodeReader } from '@zxing/browser';
 
 import {
-  compressEncryptSign,
-  decryptVerifyDecompress,
-  generateEncryptionKeyPair,
-  generateSigningKeyPair
-} from "./crypto/encryption";
-
-import {
-  arrayBufferToBase64,
-  base64ToArrayBuffer,
-  base64ToUint8,
-  compressJSON,
-  cryptoKeyToBase64,
-  decompressJSON,
   formatFileSize,
   getFileCategory,
-  getUploadSpeed,
-  importECDHPublicKey,
-  importECDSAPublicKey,
-  uint8ToBase64,
-  type Sample
 } from "./utils/convert";
 
 import { UploadAnimation } from "./objects/upload-animation";
 import { getNetworkState, NetworkStatus } from "./utils/networkState";
-import { ConnectionType, PeerType, ViewPage } from "./types";
+import { ConnectionType, PeerType, TransferState, ViewPage} from "./types";
+import { Sender } from "./core/sender";
+import { Reciever } from "./core/reciever";
 
-// ===================== CONFIG =====================
-const config: RTCConfiguration = {
-  iceServers: [
-    // { urls: "stun:stun.l.google.com:19302" }
-  ]
-};
-
-const CHUNK_SIZE = 16 * 1024;
-
-// ===================== STATE =====================
-let pc: RTCPeerConnection;
-let dataChannel: RTCDataChannel;
-
-// ===================== TYPES =====================
-type ChunkPayload = {
-  fileId: number;
-  index: number;
-  ciphertext: string;
-  iv: string;
-  signature: string;
-  ephemeralPublicKey: string;
-};
 
 type FileInfo = {
   fileId: number;
@@ -60,31 +23,9 @@ type FileInfo = {
   fileType: string;
 };
 
-type Status = {
-  ok: boolean;
-  type: "recipientEncryptionKey" | "senderSigningKey" | "complete" | "fileInfo" | "pause";
-};
-
-type PauseStatus = {
-  pause: boolean;
-  from: "sender" | "reciever";
-  resumeFromFileIndex: number;
-  resumeFromChunkIndex: number;
-};
-
-interface DataPayload {
-  data: ChunkPayload | string | FileInfo[] | Status | PauseStatus;
-  type:
-    | "recipientEncryptionKey"
-    | "senderSigningKey"
-    | "chunk"
-    | "status"
-    | "fileInfo"
-    | "pauseInfo";
-}
-
 // ===================== DOM =====================
 const videoScanner = document.getElementById("qrVideo") as HTMLVideoElement;
+const codeReader = new BrowserQRCodeReader();
 const canvas = document.getElementById("qrCanvas") as HTMLCanvasElement;
 
 const uploadProgressElm = document.getElementById("uploadProgress")!;
@@ -95,434 +36,166 @@ const pauseToggleBtn = document.getElementById("pauseToggle") as HTMLButtonEleme
 const peerPauseBar = document.getElementById("peerPauseBar") as HTMLDivElement;
 const peerPauseTextElm = document.getElementById("peerPauseText") as HTMLDivElement;
 
-// ===================== UTIL =====================
-// const splitBuffer = (buffer: ArrayBuffer) => {
-//   const chunks: ArrayBuffer[] = [];
-//   for (let i = 0; i < buffer.byteLength; i += CHUNK_SIZE) {
-//     chunks.push(buffer.slice(i, i + CHUNK_SIZE));
-//   }
-//   return chunks;
-// };
-
 const showQR = (data: string) => {
   QRCode.toCanvas(canvas, data, { errorCorrectionLevel: "L" });
 };
 
-// ===================== CAMERA =====================
-async function startCamera() {
-  videoScanner.autoplay = true;
-  videoScanner.srcObject = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "environment" }
-  });
-  await videoScanner.play();
-  return videoScanner;
-}
-
-async function scanQR(video: HTMLVideoElement, onResult: (data: string) => void) {
-  //@ts-ignore
-  const detector = new BarcodeDetector({ formats: ["qr_code"] });
-
-  const interval = setInterval(async () => {
-    if (video.readyState < 2) return;
-
-    const codes = await detector.detect(video);
-    if (codes.length) {
-      clearInterval(interval);
-      onResult(codes[0].rawValue);
-    }
-  }, 400);
-}
 
 // ===================== COMMON =====================
 function updateUIProgress(progress: number) {
   uploadProgressElm.textContent = `${progress.toFixed(0)}%`;
 }
 
-function updateSpeed(samples: Sample[], bytes: number) {
-  samples.push({ time: performance.now(), bytes });
-  uploadRateElm.textContent = getUploadSpeed(samples);
+function updateSpeed(bytesPerSec: number) {
+  uploadRateElm.textContent = `${formatFileSize(bytesPerSec)}/s`;
 }
 
-// ===================== SENDER =====================
 
-async function startSender() {
-  pc = new RTCPeerConnection(config);
-  dataChannel = pc.createDataChannel("fileTransfer");
-  dataChannel.bufferedAmountLowThreshold = 512 * 1024;
+function applyRemotePause(isPause: boolean, by: "reciever" | "sender") {
+  peerPauseBar.classList.toggle("show-peer-pause", isPause);
+  peerPauseTextElm.textContent = by === "reciever" ? "Paused by Receiver" : "Paused by Sender";
+}
 
-  dataChannel.onopen = async () => {
-    viewPage = ViewPage.FilesTransfer;
-    updatePageUI();
+async function initSender() {
+  // 1. Initialize sender
+  const sender = await Sender.initConnection();
 
-    // Logic for keys and state remains the same
-    const senderKeys = await generateSigningKeyPair();
-    const senderPub = await cryptoKeyToBase64(senderKeys.publicKey);
+  const anim: UploadAnimation = new UploadAnimation(0, "sender");
 
-    let recipientKey: CryptoKey | null = null;
-    let senderAck = false;
-    let fileStarted = false;
-    const samples: Sample[] = [];
+  sender.on("stateChange", async (evt) => {
+    const state = evt.state;
 
-    const senderPause: PauseStatus = { pause: false, from: "sender", resumeFromFileIndex: 0, resumeFromChunkIndex: 0 };
-    const receiverPause: PauseStatus = { pause: false, from: "reciever", resumeFromFileIndex: 0, resumeFromChunkIndex: 0 };
-
-    pauseToggleBtn.textContent = "Pause";
-
-    dataChannel.send(JSON.stringify({ type: "senderSigningKey", data: senderPub }));
-
-    const anim = new UploadAnimation(0, "sender");
-
-    async function calculateTotalChunks(handles: FileSystemFileHandle[]) {
-      let totalChunks = 0;
-      for (const handle of handles) {
-        const file = await handle.getFile();
-        totalChunks += Math.ceil(file.size / CHUNK_SIZE);
+    switch (state) {
+      case TransferState.Handshaking: {
+        viewPage = ViewPage.FilesTransfer;
+        await updatePageUI();
+        anim.mount();
       }
-      return totalChunks;
     }
+  });
 
-    const files = await getAllFilesInfo();
-    const filesTotalSize = files.reduce((acc, cur) => acc + cur.fileSize, 0);
+  sender.on("fileInfo", (evt) => {
+    const totaChunks = evt.files.reduce((acc, cur) => acc + cur.total, 0);
+    const filesTotalSize = evt.files.reduce((acc, cur) => acc + cur.fileSize, 0);
+    anim.updateRequestedChunks(totaChunks);
+    fileSizeElm.textContent = formatFileSize(filesTotalSize, 2);
+    updatePreviewPage(evt.files);
+  });
 
-    // We still need a way to track progress, so we pre-calculate total chunks 
-    // based on our known chunk size (assuming a constant CHUNK_SIZE used in splitBuffer)
-    const CHUNK_SIZE = 16 * 1024; // Example size, adjust to your splitBuffer logic
-    const totalChunks = await calculateTotalChunks(fileHandles);
+  sender.on("progress", (evt) => {
+    const progress = evt.percent;
+    updateUIProgress(progress);
+    anim.updateProgress(progress);
+  });
 
-    const sendChunks = async (startFileId: number, startChunkIndex: number) => {
-      let globalChunkNo = await calculateTotalChunks(fileHandles.slice(0, startFileId)) + startChunkIndex;
+  sender.on("speed", (evt) => {
+    const speed = evt.bytesPerSecond;
+    updateSpeed(speed);
+  });
 
-      console.log(fileHandles.length, "ins", files);
-      for (let fileId = startFileId; fileId < fileHandles.length; fileId++) {
-        const handle = fileHandles[fileId];
-
-
-        const file = await handle.getFile();
-        const stream = file.stream();
-        const reader = stream.getReader();
-        let currentFileChunkIndex = 0;
-
-        try {
-          let buffer = new Uint8Array(0);
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done && buffer.length === 0) break;
-          
-            if (value) {
-              // append incoming chunk
-              const temp = new Uint8Array(buffer.length + value.length);
-              temp.set(buffer, 0);
-              temp.set(value, buffer.length);
-              buffer = temp;
-            }
-          
-            // process fixed-size chunks
-            while (buffer.length >= CHUNK_SIZE || (done && buffer.length > 0)) {
-              const chunk = buffer.slice(0, CHUNK_SIZE);
-              buffer = buffer.slice(CHUNK_SIZE);
-            
-              // ===== YOUR EXISTING LOGIC STARTS HERE =====
-            
-              if (senderPause.pause) {
-                senderPause.resumeFromFileIndex = fileId;
-                senderPause.resumeFromChunkIndex = currentFileChunkIndex;
-                dataChannel.send(JSON.stringify({ type: "pauseInfo", data: senderPause }));
-                return;
-              }
-            
-              if (receiverPause.pause) return;
-            
-              const payload = await compressEncryptSign(
-                senderKeys,
-                recipientKey!,
-                chunk.buffer
-              );
-            
-              if (dataChannel.bufferedAmount > dataChannel.bufferedAmountLowThreshold) {
-                await new Promise<void>(res => {
-                  dataChannel.onbufferedamountlow = () => res();
-                });
-              }
-            
-              const chunkData: ChunkPayload = {
-                fileId: fileId,
-                index: currentFileChunkIndex,
-                ciphertext: arrayBufferToBase64(payload.ciphertext),
-                ephemeralPublicKey: arrayBufferToBase64(payload.ephemeralPublicKey),
-                signature: arrayBufferToBase64(payload.signature),
-                iv: uint8ToBase64(payload.iv),
-              };
-            
-              const chunkPayload: DataPayload = {
-                type: "chunk",
-                data: chunkData,
-              };
-            
-              dataChannel.send(JSON.stringify(chunkPayload));
-            
-              updateSpeed(samples, payload.ciphertext.byteLength);
-            
-              const progress = ((globalChunkNo + 1) / totalChunks) * 100;
-              updateUIProgress(progress);
-              anim.updateProgress(progress);
-            
-              globalChunkNo++;
-              currentFileChunkIndex++;
-            
-              console.log(globalChunkNo);
-              await new Promise(r => setTimeout(r, 0));
-            }
-          
-            if (done) break;
-          }
-        } finally {
-          reader.releaseLock();
-        }
-        
-        // Reset startChunkIndex for subsequent files in the loop
-        startChunkIndex = 0;
-      }
-    };
-
-    dataChannel.onmessage = async (event) => {
-      const msg = JSON.parse(event.data) as DataPayload;
-      fileSizeElm.textContent = formatFileSize(filesTotalSize, 2);
-
-      if (msg.type === "recipientEncryptionKey") {
-        recipientKey = await importECDHPublicKey(msg.data as string);
-        dataChannel.send(JSON.stringify({ type: "status", data: { ok: true, type: "recipientEncryptionKey" } }));
-        dataChannel.send(JSON.stringify({ type: "senderSigningKey", data: senderPub }));
-      }
-
-      if (msg.type === "status") {
-        const { ok, type } = msg.data as Status;
-        if (type === "senderSigningKey" && ok) senderAck = true;
-        if (type === "complete" && ok) pc.close();
-      }
-
-      if (!fileStarted && senderAck && recipientKey) {
-        fileStarted = true;
-        anim.updateRequestedChunks(totalChunks);
-        console.log("here");
-
-        const fileInfo: FileInfo[] = files.map((file, i) => ({
-          fileId: i,
-          name: file.name,
-          fileSize: file.fileSize,
-          fileType: file.fileType,
-          total: Math.ceil(file.fileSize / CHUNK_SIZE),
-        }));
-
-        dataChannel.send(JSON.stringify({ type: "fileInfo", data: fileInfo }));
-        sendChunks(0, 0);
-      }
-
-      if (msg.type === "pauseInfo") {
-        const { pause, resumeFromFileIndex, resumeFromChunkIndex } = msg.data as PauseStatus;
-        receiverPause.pause = pause;
-        senderPause.resumeFromFileIndex = resumeFromFileIndex;
-        senderPause.resumeFromChunkIndex = resumeFromChunkIndex;
-
-        pause ? peerPauseBar.classList.add("show-peer-pause") : peerPauseBar.classList.remove("show-peer-pause");
-        peerPauseTextElm.textContent = "Paused by Reciever";
-
-        if (!pause) sendChunks(senderPause.resumeFromFileIndex, senderPause.resumeFromChunkIndex);
-      }
-    };
-
-    pauseToggleBtn.onclick = () => {
-      senderPause.pause = !senderPause.pause;
-      pauseToggleBtn.textContent = senderPause.pause ? "Resume" : "Pause";
-      senderPause.pause ? pauseToggleBtn.classList.add("paused") : pauseToggleBtn.classList.remove("paused");
-      dataChannel.send(JSON.stringify({ type: "pauseInfo", data: senderPause }));
-
-      if (!senderPause.pause) {
-        sendChunks(senderPause.resumeFromFileIndex, senderPause.resumeFromChunkIndex);
-      }
-    };
-  };
-
-  pc.onicecandidate = async (e) => {
-    if (!e.candidate) {
-      showQR(compressJSON({ sdp: pc.localDescription }));
+  sender.on("pause", (evt) => {
+    if (evt.by === "remote") {
+      applyRemotePause(evt.paused, "reciever");
     }
+  });
+
+  sender.on("closed", (evt) => {
+    const isClosed = evt.isClosed;
+    if (!isClosed) return;
+    anim.cleanup();
+  });
+
+  pauseToggleBtn.onclick = () => {
+    if (!sender) return; // safety check
+
+    // Toggle pause state
+    const nextPause = !sender.getisPaused();
+
+    // Inform sender to pause/resume properly
+    sender.onLocalPause(nextPause);
+
+    // Update button UI
+    pauseToggleBtn.textContent = nextPause ? "Resume" : "Pause";
+    pauseToggleBtn.classList.toggle("paused", nextPause);
   };
 
-  await pc.setLocalDescription(await pc.createOffer());
+  return sender;
 }
 
-// ===================== RECEIVER =====================
+async function initReceiver() {
+  // 1️⃣ Init receiver (protocol + crypto handled internally)
+  const receiver = await Reciever.initConnection();
 
-async function startReceiver() {
-  pc = new RTCPeerConnection(config);
+  const anim = new UploadAnimation(0, "receiver");
 
-  pc.ondatachannel = async (event) => {
-    viewPage = ViewPage.FilesTransfer;
-    updatePageUI();
+  let filesInfo: FileInfo[] | null = null;
 
-    const channel = event.channel;
-    const anim = new UploadAnimation(0, "receiver");
+  receiver.on("stateChange", async (evt) => {
+    const state = evt.state;
 
-    // 1. Get access to the private disk storage
-    const opfsRoot = await navigator.storage.getDirectory();
-
-    const keyPair = await generateEncryptionKeyPair();
-    const pubKey = await cryptoKeyToBase64(keyPair.publicKey);
-
-    console.log("here");
-
-    channel.send(JSON.stringify({
-      type: "recipientEncryptionKey",
-      data: pubKey
-    }));
-
-    let senderKey: CryptoKey | null = null;
-    let filesInfo: FileInfo[] = [];
-    
-    // Replace ArrayBuffer[][] with FileSystemWritableFileStream[]
-    let fileWriters: FileSystemWritableFileStream[] = [];
-    
-    let expected = 0;
-    let receivedIndex: { fileId: number; index: number }[] = [];
-    const samples: Sample[] = [];
-
-    const pauseState: PauseStatus = {
-      pause: false,
-      from: "reciever",
-      resumeFromFileIndex: 0,
-      resumeFromChunkIndex: 0,
-    };
-
-    pauseToggleBtn.textContent = pauseState.pause ? "Resume" : "Pause";
-    pauseToggleBtn.onclick = () => {
-      pauseState.pause = !pauseState.pause;
-      pauseToggleBtn.textContent = pauseState.pause ? "Resume" : "Pause";
-      pauseState.pause ? pauseToggleBtn.classList.add("paused") : pauseToggleBtn.classList.remove("paused");
-
-      const pausePayload: DataPayload = {
-        type: "pauseInfo",
-        data: pauseState,
+    switch (state) {
+      case TransferState.Handshaking: {
+        viewPage = ViewPage.FilesTransfer;
+        await updatePageUI();
+        anim.mount();
       }
-      channel.send(JSON.stringify(pausePayload));
-    };
+    }
+  });
 
-    channel.onmessage = async (event) => {
-      const msg = JSON.parse(event.data) as DataPayload;
+  receiver.on("fileInfo", (evt) => {
+    filesInfo = evt.files;
+    const totaChunks = evt.files.reduce((acc, cur) => acc + cur.total, 0);
+    const filesTotalSize = evt.files.reduce((acc, cur) => acc + cur.fileSize, 0);
+    anim.updateRequestedChunks(totaChunks);
+    fileSizeElm.textContent = formatFileSize(filesTotalSize, 2);
+    updatePreviewPage(evt.files);
+  });
 
-      if (msg.type === "senderSigningKey") {
-        console.log("senderKey" ,msg);
-        senderKey = await importECDSAPublicKey(msg.data as string);
-        channel.send(JSON.stringify({ type: "status", data: { ok: true, type: "senderSigningKey" } }));
-        channel.send(JSON.stringify({ type: "recipientEncryptionKey", data: pubKey }));
-      }
+  receiver.on("progress", (evt) => {
+    const progress = evt.percent;
+    updateUIProgress(progress);
+    anim.updateProgress(progress);
+  });
 
-      if (msg.type === "fileInfo") {
-        console.log("fileInfo", filesInfo);
-        const infoList = msg.data as FileInfo[];
-        filesInfo = infoList;
-        expected = filesInfo.reduce((acc, cur) => acc + cur.total, 0);
-        const totalFilesSize = filesInfo.reduce((acc, cur) => acc + cur.fileSize, 0);
+  receiver.on("speed", (evt) => {
+    const speed = evt.bytesPerSecond;
+    updateSpeed(speed);
+  });
 
-        // 2. Prepare the Disk Writers for each file
-        for (const info of filesInfo) {
-          console.log("fileInfo", info);
-          // const div = document.createElement("div");
-          // div.addEventListener("click", async () => {
-            const fileHandle = await opfsRoot.getFileHandle(info.name, { create: true })
-            fileWriters[info.fileId] = await fileHandle.createWritable();
-          // });
-          // div.click();
-        }
+  receiver.on("pause", (evt) => {
+    if (evt.by === "remote") {
+      applyRemotePause(evt.paused, "sender");
+    }
+  });
 
-        anim.updateRequestedChunks(expected);
-        fileSizeElm.textContent = formatFileSize(totalFilesSize, 2);
-      }
+  receiver.on("complete", (evt) => {
+    if (filesInfo && evt) setupFinalDownload(filesInfo, evt.opfs);
+  });
 
-      if (msg.type === "chunk" && senderKey && !pauseState.pause) {
-        const chunk = msg.data as ChunkPayload;
-        console.log("ch", chunk);
+  receiver.on("closed", (evt) => {
+    const isClosed = evt.isClosed;
+    if (!isClosed) return;
+    anim.cleanup();
+  });
+  
+  // 🔟 Pause button (IMPORTANT: use class API, not local state)
+  pauseToggleBtn.onclick = () => {
+    const nextPause = !receiver['pauseState'].pause;
 
-        const decrypted = await decryptVerifyDecompress(
-          senderKey,
-          keyPair,
-          {
-            ciphertext: base64ToArrayBuffer(chunk.ciphertext),
-            iv: base64ToUint8(chunk.iv),
-            signature: base64ToArrayBuffer(chunk.signature),
-            ephemeralPublicKey: base64ToArrayBuffer(chunk.ephemeralPublicKey)
-          }
-        );
+    receiver.onLocalPause(nextPause);
 
-        // 3. Write to disk at the calculated offset
-        // We assume a consistent chunk size here (e.g., 16KB). 
-        // If your sender varies sizes, you'd need the byte offset sent in the payload.
-        const CHUNK_SIZE = 16384; // Adjust to match your splitBuffer size
-        const offset = chunk.index * CHUNK_SIZE;
-
-        await fileWriters[chunk.fileId].write({
-          type: "write",
-          position: offset,
-          data: decrypted.buffer as ArrayBuffer // Cast to satisfy TS
-        });
-
-        if (!receivedIndex.find(ri => ri.fileId === chunk.fileId && ri.index === chunk.index)) {
-          receivedIndex.push({ fileId: chunk.fileId, index: chunk.index });
-        }
-        
-        const received = receivedIndex.length;
-        const fileInfo = filesInfo[chunk.fileId];
-
-        // Update pause indices
-        if (chunk.index + 1 >= fileInfo.total) {
-          pauseState.resumeFromFileIndex = chunk.fileId + 1;
-          pauseState.resumeFromChunkIndex = 0;
-        } else {
-          pauseState.resumeFromFileIndex = chunk.fileId;
-          pauseState.resumeFromChunkIndex = chunk.index + 1;
-        }
-
-        const progress = (received / expected) * 100;
-        updateUIProgress(progress);
-        anim.updateProgress(progress);
-        updateSpeed(samples, received);
-
-        if (received === expected) {
-          pauseToggleBtn.classList.add("hidden");
-          downloadBtn.classList.remove("hidden");
-
-          // 4. Close all writers to ensure data is flushed to the OS
-          for (const writer of fileWriters) {
-            await writer.close();
-          }
-
-          setupFinalDownload(filesInfo, opfsRoot);
-
-          channel.send(JSON.stringify({
-            type: "status",
-            data: { ok: true, type: "complete" }
-          }));
-
-          pc.close();
-        }
-      }
-
-      if (msg.type === "pauseInfo") {
-        const { pause } = msg.data as PauseStatus;
-        pause ? peerPauseBar.classList.add("show-peer-pause") : peerPauseBar.classList.remove("show-peer-pause");
-        peerPauseTextElm.textContent = "Paused by Sender";
-      }
-    };
+    pauseToggleBtn.textContent = nextPause ? "Resume" : "Pause";
+    pauseToggleBtn.classList.toggle("paused", nextPause);
   };
-  pc.onicecandidate = async (e) => {
-    if (!e.candidate) showQR(compressJSON({ sdp: pc.localDescription }));
-  };
+
+  return receiver;
 }
-
 
 async function setupFinalDownload(filesInfo: FileInfo[], opfsRoot: FileSystemDirectoryHandle) {
+    downloadBtn.classList.remove("disabled");
     downloadBtn.onclick = async () => {
-        for (const info of filesInfo) {
+      const filteredFilesInfo = filesInfo.filter(info => !removeFileIds.includes(info.fileId));
+        for (const info of filteredFilesInfo) {
             const fileHandle = await opfsRoot.getFileHandle(info.name);
             const file = await fileHandle.getFile();
             
@@ -535,16 +208,13 @@ async function setupFinalDownload(filesInfo: FileInfo[], opfsRoot: FileSystemDir
     };
 }
 
-// function clearScan() {
-//   (videoScanner.srcObject as MediaStream)?.getTracks().forEach(t => t.stop());
-//   videoScanner.srcObject = null;
-//   canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-// }
-
 function stopCamera() {
   (videoScanner.srcObject as MediaStream)?.getTracks().forEach(t => t.stop());
   videoScanner.srcObject = null;
 }
+
+let sender: Sender | null = null;
+let reciever: Reciever | null = null;
 
 let networkStatus: NetworkStatus | null = null;
 let connectionType: ConnectionType = ConnectionType.Local;
@@ -557,60 +227,13 @@ const localInitialView = document.getElementById("local") as HTMLDivElement;
 const globalInitialView = document.getElementById("global") as HTMLDivElement;
 const qrExchangeView = document.getElementById("qrExchangeCard") as HTMLDivElement;
 const qrExchangeChooseCont = document.getElementById("qrExchangeChoose") as HTMLDivElement;
-const downloadBtn = document.getElementById("download") as HTMLDivElement;
+const downloadBtn = document.getElementById("downloadBtn") as HTMLDivElement;
+const previewBtn = document.getElementById("previewBtn") as HTMLDivElement;
+const previewView = document.getElementById("preview") as HTMLDivElement;
+const previewBackBtn = document.getElementById("previewBackBtn") as HTMLDivElement;
 
-function updatePageUI() {
+async function updatePageUI() {
   stopCamera();
-  switch (viewPage) {
-    case ViewPage.TransferLanding: {
-      transferLandingView.classList.remove("hidden");
-      localCardFileUploadView.classList.add("hidden");
-      qrExchangeView.classList.add("hidden");
-      fileTransferView.classList.add("hidden");
-
-      break;
-    } case ViewPage.FilesUpload: {
-      transferLandingView.classList.add("hidden");
-      localCardFileUploadView.classList.remove("hidden");
-      qrExchangeView.classList.add("hidden");
-      fileTransferView.classList.add("hidden");
-
-      break;
-    } case ViewPage.QrExchangeShow:
-      case ViewPage.QrExchangeScan: {
-      transferLandingView.classList.add("hidden");
-      localCardFileUploadView.classList.add("hidden");
-      fileTransferView.classList.add("hidden");
-      qrExchangeView.classList.remove("hidden");
-
-      if (viewPage === ViewPage.QrExchangeShow) {
-        showQrBtn.classList.add("selected");
-        showQrView.classList.remove("hidden");
-
-        scanQrBtn.classList.remove("selected");
-        scanQrView.classList.add("hidden");
-      } else {
-        scanQrBtn.classList.add("selected");
-        scanQrView.classList.remove("hidden");
-
-        showQrBtn.classList.remove("selected");
-        showQrView.classList.add("hidden");
-
-        startScan();
-      }
-
-      break;
-    } case ViewPage.FilesTransfer: {
-        transferLandingView.classList.add("hidden");
-        localCardFileUploadView.classList.add("hidden");
-        fileTransferView.classList.remove("hidden");
-        qrExchangeView.classList.add("hidden");
-
-        pauseToggleBtn.classList.remove("hidden");
-        downloadBtn.classList.add("hidden");
-      break;
-    }
-  }
 
   switch (connectionType) {
     case ConnectionType.Local: {
@@ -637,9 +260,11 @@ function updatePageUI() {
     case PeerType.Sender: {
       qrExchangeChooseCont.classList.remove("reverse-row");
       showQrBtn.classList.remove("disabled");
+      downloadBtn.classList.add("hidden");
 
       break;
     } case PeerType.Reciever: {
+      console.log("rec");
       qrExchangeChooseCont.classList.add("reverse-row");
       if (!isQrScanned) showQrBtn.classList.add("disabled");
       else showQrBtn.classList.remove("disabled");
@@ -647,7 +272,100 @@ function updatePageUI() {
       break;
     }
   }
+
+  switch (viewPage) {
+    case ViewPage.TransferLanding: {
+      transferLandingView.classList.remove("hidden");
+      localCardFileUploadView.classList.add("hidden");
+      qrExchangeView.classList.add("hidden");
+      fileTransferView.classList.add("hidden");
+
+      sender = null;
+      reciever = null;
+
+      break;
+    } case ViewPage.FilesUpload: {
+      transferLandingView.classList.add("hidden");
+      localCardFileUploadView.classList.remove("hidden");
+      qrExchangeView.classList.add("hidden");
+      fileTransferView.classList.add("hidden");
+
+      break;
+    } case ViewPage.QrExchangeShow:
+      case ViewPage.QrExchangeScan: {
+      transferLandingView.classList.add("hidden");
+      localCardFileUploadView.classList.add("hidden");
+      fileTransferView.classList.add("hidden");
+      qrExchangeView.classList.remove("hidden");
+
+      if (peerType === PeerType.Sender) {
+        if (sender === null) sender = await initSender();
+        console.log(fileHandles);
+        await sender.initFiles(fileHandles);
+      }
+
+      if (peerType === PeerType.Reciever && reciever === null) {
+        reciever = await initReceiver();
+      }
+
+      if (viewPage === ViewPage.QrExchangeShow) {
+        showQrBtn.classList.add("selected");
+        showQrView.classList.remove("hidden");
+
+        scanQrBtn.classList.remove("selected");
+        scanQrView.classList.add("hidden");
+
+        if (peerType === PeerType.Sender && sender) {
+          const offer = await sender.getDescriptorJSON();
+          showQR(offer);
+        }
+        if (peerType === PeerType.Reciever && reciever) {
+          const answer = await reciever.getDescriptorJSON();
+          showQR(answer);
+        }
+      } else {
+        scanQrBtn.classList.add("selected");
+        scanQrView.classList.remove("hidden");
+
+        showQrBtn.classList.remove("selected");
+        showQrView.classList.add("hidden");
+        
+        if (peerType === PeerType.Sender && sender) {
+          const answer = await scanQRAndReturn();
+          isQrScanned = true;
+          await sender.setRemoteDescriptor(answer);
+        }
+        if (peerType === PeerType.Reciever && reciever) {
+          const offer = await scanQRAndReturn();
+          isQrScanned = true;
+          await reciever.setRemoteDescriptor(offer);
+          viewPage = ViewPage.QrExchangeShow;
+          updatePageUI();
+        }
+      }
+
+      break;
+    } case ViewPage.FilesTransfer: {
+        transferLandingView.classList.add("hidden");
+        localCardFileUploadView.classList.add("hidden");
+        fileTransferView.classList.remove("hidden");
+        qrExchangeView.classList.add("hidden");
+        previewView.classList.add("hidden");
+
+        pauseToggleBtn.classList.remove("hidden");
+        downloadBtn.classList.add("disabled");
+      break;
+    }
+  }
 }
+
+previewBtn.addEventListener("click", () => {
+  previewView.classList.remove("hidden");
+});
+
+previewBackBtn.addEventListener("click", () => {
+  previewView.classList.add("hidden");
+});
 
 localConnectionBtn.addEventListener("click", () => {
   if (connectionType === ConnectionType.Local) return;
@@ -705,14 +423,12 @@ recieveFileLocalBtn.addEventListener('click', () => {
   peerType = PeerType.Reciever;
   viewPage = ViewPage.QrExchangeScan;
   updatePageUI();
-  startReceiver();
 })
 
 sendFileLocalBtn.addEventListener("click", () => {
   peerType = PeerType.Sender;
   viewPage = ViewPage.FilesUpload;
   updatePageUI();
-  startSender();
 });
 
 localFileUploadBackBtn.addEventListener("click", () => {
@@ -728,15 +444,12 @@ const localFileUploadBtn = document.getElementById("localFileDrpzn") as HTMLDivE
 // Global state: only store handles, not File objects!
 let fileHandles: FileSystemFileHandle[] = [];
 localFileUploadBtn.addEventListener("click", async () => {
-  // localFileInputElm.click();
   try {
-    // 1. Open the native OS picker
     //@ts-ignore
     const pickerHandles = await window.showOpenFilePicker({
       multiple: true
     });
 
-    // 2. Add to our persistent list
     fileHandles.push(...pickerHandles);
     
     updateLocalFileView();
@@ -750,11 +463,6 @@ localFileInputElm.addEventListener("change", (evt) => {
   const selectedFileList = inputTarget.files;
   
   if (!selectedFileList || selectedFileList.length === 0) return;
-
-  // Instead of spreading (...), append individually to avoid temporary array creation
-  // for (let i = 0; i < selectedFileList.length; i++) {
-  //   files.push(selectedFileList[i]);
-  // }
 
   updateLocalFileView();
 
@@ -775,6 +483,7 @@ const localFileListCont = document.getElementById("localFileList")!;
 
 async function getAllFilesInfo() {
   const filesInfo: {name: string; fileType: string, fileSize: number}[] = [];
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   for (const handle of fileHandles) {
     const file = await handle.getFile();
@@ -783,6 +492,7 @@ async function getAllFilesInfo() {
       fileType: file.type,
       fileSize: file.size,
     })
+    await delay(0);
   }
 
   return filesInfo;
@@ -835,6 +545,51 @@ async function updateLocalFileView() {
   }
 }
 
+const previewFileListCont = document.getElementById("previewFileList") as HTMLUListElement;
+const previewFilesSummary = document.getElementById("previewFilesSummary") as HTMLDivElement;
+const previewVolSummary = document.getElementById("previewVolSummary") as HTMLDivElement;
+let removeFileIds: number[] = [];
+
+function updatePreviewPage(filesInfo: FileInfo[]) {
+  const totalSize = filesInfo.reduce((acc, cur) => acc + cur.fileSize, 0);
+  const totalFiles = filesInfo.length;
+
+  previewVolSummary.innerText = formatFileSize(totalSize);
+  previewFilesSummary.innerText = totalFiles.toString();
+
+  previewFileListCont.innerHTML = ``;
+  for (const info of filesInfo) {
+    const fileName = info.name;
+    const fileSize = formatFileSize(info.fileSize, 2);
+    const fileType = getFileCategory(undefined, info.fileType);
+
+    const liElement = document.createElement("li");
+    liElement.innerHTML = `
+        <div>
+          <div>
+            <img src="file.svg" alt="">
+          </div>
+          <div>
+            <span>${fileName}</span>
+            <span><span>${fileSize}</span> <img src="dot.svg" alt=""> <span>${fileType}</span></span>
+          </div>
+        </div>
+        <div class="file-rmv-btn">
+          ${removeFileIds.includes(info.fileId) ? '<img src="dot.svg" width="12px" alt="">' : '<img src="check.svg" width="16px" alt="">'}
+        </div>
+    `;
+    const removeBtn = liElement.querySelector(".file-rmv-btn") as HTMLDivElement;
+    removeBtn?.addEventListener("click",(e) => {
+      e.stopPropagation();
+      if (removeFileIds.includes(info.fileId)) removeFileIds = removeFileIds.filter(id => id !== info.fileId);
+      else removeFileIds.push(info.fileId);
+      updatePreviewPage(filesInfo);
+    });
+
+    previewFileListCont.appendChild(liElement);
+  }
+}
+
 const localFileUploadNextBtn = document.getElementById("localFileUploadNextBtn") as HTMLDivElement;
 
 localFileUploadNextBtn.addEventListener("click", (e) => {
@@ -877,20 +632,94 @@ scanQrBtn.addEventListener("click", (e) => {
   updatePageUI();
 });
 
-async function startScan() {
-  const video = await startCamera();
+async function scanQRAndReturn(): Promise<string> {
+  return new Promise<string>(async (resolve, reject) => {
+    let stopped = false;
 
-  scanQR(video, async (data) => {
-    console.log("here");
-    await pc.setRemoteDescription(decompressJSON(data).sdp);
-    console.log("here too");
-    isQrScanned = true;
-    if (peerType === PeerType.Reciever) {
-      viewPage = ViewPage.QrExchangeShow;
-      await pc.setLocalDescription(await pc.createAnswer());
-      updatePageUI();
+    videoScanner.setAttribute("autoplay", "true");
+    videoScanner.setAttribute("playsinline", "true"); // iOS fix
+    
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" }
+      });
+    } catch (err) {
+      reject(err);
+      return;
+    }
+
+    videoScanner.srcObject = stream;
+    await videoScanner.play();
+
+    // 🛑 Cleanup
+    const stopAll = () => {
+      if (stopped) return;
+      stopped = true;
+
+      stream.getTracks().forEach(track => track.stop());
+      videoScanner.pause();
+      videoScanner.srcObject = null;
+    };
+
+    try {
+      if ("BarcodeDetector" in window) {
+        //@ts-ignore
+        const detector = new BarcodeDetector({ formats: ["qr_code"] });
+
+        const interval = setInterval(async () => {
+          if (stopped) return;
+          if (videoScanner.readyState < 2) return;
+
+          try {
+            const codes = await detector.detect(videoScanner);
+            if (codes.length) {
+              clearInterval(interval);
+              stopAll();
+              resolve(codes[0].rawValue);
+            }
+          } catch (err) {
+            clearInterval(interval);
+            stopAll();
+            reject(err);
+          }
+        }, 300);
+
+      } else {
+        try {
+          const result = await codeReader.decodeOnceFromVideoElement(videoScanner);
+          stopAll();
+          resolve(result.getText());
+        } catch (err) {
+          stopAll();
+          reject(err);
+        }
+      }
+    } catch (err) {
+      stopAll();
+      reject(err);
     }
   });
 }
 
 const fileTransferView = document.getElementById("localCardFileTransfer") as HTMLDivElement;
+const transferCancleBtn = document.getElementById("transferCancleBtn") as HTMLDivElement;
+
+transferCancleBtn.addEventListener("click", () => {
+  if (sender) {
+    sender.cleanup();
+  }
+  if (reciever) {
+    reciever.cleanup();
+  }
+  sender = null;
+  reciever = null;
+
+  while (fileHandles.length) fileHandles.pop();
+
+  viewPage = ViewPage.TransferLanding;
+  peerType = null;
+  connectionType = ConnectionType.Local;
+  updateHomePage();
+  updatePageUI();
+});

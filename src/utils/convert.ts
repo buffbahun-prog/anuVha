@@ -1,6 +1,5 @@
 import { compressSync, decompressSync } from "fflate";
-
-export type Sample = { time: number; bytes: number };
+import type { Sample } from "../types";
 
 // ====== UTILITIES ======
 export function bufferToBase64(buffer: ArrayBuffer): string {
@@ -120,6 +119,24 @@ export function getUploadSpeed(samples: Sample[]): string {
     return `${formatFileSize(bytesPerSec)}/s`
 }
 
+export function calculateSpeed(samples: Sample[]): number {
+  const now = performance.now();
+  const WINDOW = 1000; // 1 second
+
+  // Remove old samples
+  while (samples.length && samples[0].time < now - WINDOW) {
+    samples.shift();
+  }
+
+  // Sum bytes in window
+  let totalBytes = 0;
+  for (const s of samples) {
+    totalBytes += s.bytes;
+  }
+
+  return totalBytes / (WINDOW / 1000); // bytes/sec
+}
+
 export function getFileCategory(file?: File, type?: string) {
   if (!type) return;
   type = file ? file.type : type;
@@ -171,4 +188,86 @@ export const decodeSDP = (payload: Uint8Array<ArrayBuffer>) => {
   const sdp = new TextDecoder().decode(sdpBytes);
 
   return { type, sdp };
+}
+
+export const createChunkBitmap = (totalChunks: number): Uint8Array => {
+  const byteLength = Math.ceil(totalChunks / 8);
+  const bitmap = new Uint8Array(byteLength);
+
+  const remainingBits = totalChunks % 8;
+
+  if (remainingBits !== 0) {
+    const lastByteIndex = byteLength - 1;
+
+    // Create mask where unused bits = 1
+    // Example: remainingBits = 1 → mask = 11111110
+    const mask = (~((1 << remainingBits) - 1)) & 0xFF;
+
+    bitmap[lastByteIndex] = mask;
+  }
+
+  return bitmap;
+}
+
+export const setChunkReceived = (bitmap: Uint8Array, chunkId: number) => {
+  const byteIndex = chunkId >> 3;      // same as Math.floor(chunkId / 8)
+  const bitIndex = chunkId & 7;        // same as chunkId % 8
+
+  bitmap[byteIndex] |= (1 << bitIndex);
+}
+
+export const getMissingChunks = (bitmap: Uint8Array, totalChunks: number): number[] => {
+  const missing: number[] = [];
+
+  for (let byteIndex = 0; byteIndex < bitmap.length; byteIndex++) {
+    let byte = bitmap[byteIndex];
+
+    if (byte === 0xFF) continue;
+
+    for (let bit = 0; bit < 8; bit++) {
+      const chunkId = (byteIndex << 3) + bit;
+      if (chunkId >= totalChunks) break;
+
+      if (((byte >> bit) & 1) === 0) {
+        missing.push(chunkId);
+      }
+    }
+  }
+
+  return missing;
+}
+
+export const isBitmapComplete = (bitmap: Uint8Array): boolean => {
+  for (let i = 0; i < bitmap.length; i++) {
+    if (bitmap[i] !== 0xFF) return false;
+  }
+  return true;
+}
+
+export const countReceivedChunks = (bitmap: Uint8Array, totalChunks: number): number => {
+  let count = 0;
+
+  for (let chunkId = 0; chunkId < totalChunks; chunkId++) {
+    const byteIndex = chunkId >> 3;
+    const bitIndex = chunkId & 7;
+
+    if ((bitmap[byteIndex] & (1 << bitIndex)) !== 0) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+export const isChunkReceived = (
+  chunksBitmapArray: Uint8Array[],
+  fileId: number,
+  chunkId: number
+): boolean => {
+  const bitmap = chunksBitmapArray[fileId];
+
+  const byteIndex = chunkId >> 3; // same as Math.floor(chunkId / 8)
+  const bitIndex = chunkId & 7;   // same as chunkId % 8
+
+  return (bitmap[byteIndex] & (1 << bitIndex)) !== 0;
 }

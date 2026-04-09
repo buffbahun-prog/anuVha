@@ -478,8 +478,35 @@ body::before {
   color: #22d3ee;
 }
 
+.cancle-btn {
+  position: absolute;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  left: 0;
+  top: -50px;
+  border-radius: 18px;
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  gap: .5em;
+  font-size: 1em;
+  color: #ef4444;
+}
+
+.relative {
+  position: relative;
+}
+
 .hidden {
   display: none;
+}
+
+#preview .disabled {
+  border-color: rgba(34, 211, 238, 0.15);
+      background-color: rgba(6, 57, 65, 0.5);
+      color: rgba(255, 255, 255, 0.4);
+      cursor: not-allowed;
+      opacity: 0.9;
 }
 
 .transfer-action.hidden {
@@ -508,7 +535,28 @@ body::before {
       display: flex;
     }
 
-    #localFileList {
+    #preview {
+      position: absolute;
+      width: 100%;
+      bottom: 0;
+      animation: slideUpDrastic .3s ease-out backwards;
+    }
+
+    #preview.hidden {
+      animation: slideDownDastric .3s ease-in forwards;
+    }
+
+    @keyframes slideUpDrastic {
+      from { opacity: 0; transform: translateY(50px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes slideDownDastric {
+      from { opacity: 1; transform: translateY(-50px); }
+      to { opacity: 0; transform: translateY(0); }
+    }
+
+    #localFileList, #previewFileList {
       list-style: none;
       display: flex;
       flex-direction: column;
@@ -518,7 +566,7 @@ body::before {
       scrollbar-width: none;
     }
 
-    #localFileList::-webkit-scrollbar {
+    #localFileList::-webkit-scrollbar, #previewFileList::-webkit-scrollbar {
       display: none;
     }
 
@@ -527,7 +575,12 @@ body::before {
       overflow-y: auto;
     }
 
-    #localFileList > li {
+    .has-file #previewFileList {
+      height: 30vh;
+      overflow-y: auto;
+    }
+
+    #localFileList > li, #previewFileList > li {
       background-color: var(--bg-card);
       backdrop-filter: blur(10px);
       border: 1px solid #282B3A;
@@ -545,21 +598,14 @@ body::before {
       to { opacity: 1; transform: translateY(0); }
     }
 
-    #localFileList > li > div {
+    #localFileList > li > div, #previewFileList > li > div {
       display: flex;
       justify-content: flex-start;
       align-items: center;
       /* gap: 5em; */
     }
 
-    /* #localFileList > li > div:nth-child(1) > div:nth-child(1) {
-      display: flex;
-      justify-content: flex-start;
-      gap: 5em;
-      align-items: center;
-    } */
-
-    #localFileList > li > div:nth-child(1) {
+    #localFileList > li > div:nth-child(1), #previewFileList > li > div:nth-child(1) {
       display: flex;
       justify-content: flex-start;
       gap: 1em;
@@ -572,13 +618,19 @@ body::before {
       border-radius: 8px;
     }
 
-    #localFileList > li > div:nth-child(1) > div:nth-child(1) {
+    #previewFileList > li > div:nth-child(2) {
+      border: 1px solid #22d3ee;
+      padding: 10px;
+      border-radius: 8px;
+    }
+
+    #localFileList > li > div:nth-child(1) > div:nth-child(1), #previewFileList > li > div:nth-child(1) > div:nth-child(1) {
       border-radius: 10px;
       background: rgba(255, 255, 255, 0.13);
       padding: 12px;
     }
 
-    #localFileList > li > div:nth-child(1) > div:nth-child(2) {
+    #localFileList > li > div:nth-child(1) > div:nth-child(2), #previewFileList > li > div:nth-child(1) > div:nth-child(2) {
       display: flex;
       flex-direction: column;
       justify-content: space-between;
@@ -587,7 +639,7 @@ body::before {
       font-size: 14px;
     }
 
-    #localFileList > li > div:nth-child(1) > div:nth-child(2) > span:nth-child(2) {
+    #localFileList > li > div:nth-child(1) > div:nth-child(2) > span:nth-child(2), #previewFileList > li > div:nth-child(1) > div:nth-child(2) > span:nth-child(2) {
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -596,12 +648,12 @@ body::before {
       color: #6C7280;
     }
 
-    #localFileList > li > div:nth-child(1) > div:nth-child(2) > span:nth-child(2) img {
+    #localFileList > li > div:nth-child(1) > div:nth-child(2) > span:nth-child(2) img, #previewFileList > li > div:nth-child(1) > div:nth-child(2) > span:nth-child(2) img {
       width: 5px;
       color: #6C7280;
     }
 
-    #localFileList > li > div:nth-child(1) > div:nth-child(1) img {
+    #localFileList > li > div:nth-child(1) > div:nth-child(1) img, #previewFileList > li > div:nth-child(1) > div:nth-child(1) img {
       width: 12px;
     }
 
@@ -612,10 +664,6 @@ body::before {
       gap: .5em;
       align-items: center;
     }
-
-    /* .selection-summary > div:nth-child(2) {
-      align-items: center; 
-    } */
 
     .selection-summary span {
       font-size: .7em;
@@ -659,7 +707,7 @@ body::before {
   background: #22d3ee;
   border: 1px solid #22d3ee;
   color: #151923;
-  margin-bottom: 1em;
+  /* margin-bottom: 1em; */
   font-size: 1.2em;
   font-weight: 600;
   letter-spacing: .1em; 
@@ -805,11 +853,11 @@ body::before {
       <div class="selection-summary">
         <div>
           <span>TOTAL VOLUME</span>
-          <span id="totalVolSummary">34.5 KB</span>
+          <span id="totalVolSummary"></span>
         </div>
         <div>
           <span>TOTAL FILES</span>
-          <span id="totalFilesSummary">2</span>
+          <span id="totalFilesSummary"></span>
         </div>
       </div>
       <ul id="localFileList">
@@ -841,6 +889,7 @@ body::before {
       </div>
     </div>
     <div id="localCardFileTransfer" class="card animate-home-in">
+      <div id="transferCancleBtn" class="cancle-btn"><img src="cross.svg" width="10px" alt=""> <span>Cancle</span></div>
       <div id="peerPauseBar">
         <p class="status-dot"></p>
         <span id="peerPauseText">Paused by sender</span>
@@ -865,9 +914,28 @@ body::before {
         </div>
       </div>
 
-      <div class="in-row">
-        <div id="pauseToggle" class="transfer-action"></div>
-        <div id="download" class="transfer-action">Download</div>
+      <div class="in-row has-file relative">
+        <div id="pauseToggle" class="transfer-action">Pause</div>
+        <div id="preview" class="card">
+          <div class="selection-summary">
+            <div>
+              <span>TOTAL VOLUME</span>
+              <span id="previewVolSummary"></span>
+            </div>
+            <div>
+              <span>TOTAL FILES</span>
+              <span id="previewFilesSummary"></span>
+            </div>
+          </div>
+          <ul id="previewFileList">
+            
+          </ul>
+          <div class="in-row">
+            <div id="downloadBtn" class="transfer-action">Download</div>
+            <div id="previewBackBtn" class="transfer-action">Back</div>
+          </div>
+        </div>
+        <div id="previewBtn" class="transfer-action">Preview</div>
       </div>
     </div>
   </div>
@@ -887,8 +955,6 @@ body::before {
     }
 
     window.log = log;
-    // dev helper
-    // document.getElementById("uploadInfo").showPopover();
   </script>
 </body>
 </html>

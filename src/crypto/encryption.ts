@@ -34,8 +34,8 @@ export async function compressEncryptSign(
   }
 
   // ---------------- COMPRESSION ----------------
-  const compressedUint8 = compressSync(new Uint8Array(plainBuffer));
-  const compressed = new Uint8Array(compressedUint8).slice().buffer;
+  // const compressedUint8 = compressSync(new Uint8Array(plainBuffer));
+  // const compressed = new Uint8Array(compressedUint8).slice().buffer;
 
   // ---------------- EPHEMERAL ECDH ----------------
   const ephemeralKeyPair = await crypto.subtle.generateKey(
@@ -55,7 +55,7 @@ export async function compressEncryptSign(
   const iv = crypto.getRandomValues(new Uint8Array(12));
 
   // ---------------- ENCRYPT ----------------
-  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, compressed);
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, plainBuffer);
 
   // ---------------- SIGN ----------------
   const signature = await crypto.subtle.sign(
@@ -119,7 +119,8 @@ export async function decryptVerifyDecompress(
   );
 
   // ---------------- DECOMPRESS ----------------
-  return decompressSync(new Uint8Array(decryptedCompressed));
+  return new Uint8Array(decryptedCompressed);
+  // return decompressSync(new Uint8Array(decryptedCompressed));
 }
 
 // ------------------- UTILS -------------------
