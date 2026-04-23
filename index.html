@@ -1,0 +1,962 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/anuVha/favicon.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <title>anu Vha</title>
+
+  <!-- ===================== STYLES ===================== -->
+  <style>
+    :root {
+      --primary: #22d3ee;
+      --primary-strong: #22d3ee;
+      --bg-main: #020617;
+      --bg-card: rgba(15, 23, 42, 0.5);
+      --bg-subcard: #151923;
+      --danger: #ef4444;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: sans-serif;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100dvh;
+      color: white;
+      background: var(--bg-main);
+      position: relative;
+    }
+
+    /* ===================== LAYOUT ===================== */
+    #uploadInfo {
+      width: 90vw;
+    }
+
+    .card {
+      background-color: var(--bg-card);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(34, 211, 238, 0.3);
+      border-radius: 16px;
+      color: white;
+      padding: 25px 15px;
+      position: relative;
+    }
+
+    .sub-card {
+      background-color: var(--bg-subcard);
+      border: 1px solid rgba(235, 238, 238, 0.1);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+      gap: 15px;
+      margin: 10px 0;
+    }
+
+    .info-sec {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 5px;
+    }
+
+    /* ===================== TEXT ===================== */
+    .top-heading {
+      color: #6C7280;
+      font-size: 12px;
+      margin: 0;
+    }
+
+    .description {
+      color: #23D3EE;
+      font-size: 18px;
+      margin: 0;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ===================== BUTTONS ===================== */
+    button {
+      padding: 15px 20px;
+      font-size: 12px;
+      border: 1px solid var(--primary);
+      border-radius: 6px;
+      background-color: rgba(6, 57, 65, 0.5);
+      color: white;
+      cursor: pointer;
+      transition: all 0.2s ease-in-out;
+      margin: 8px 2px;
+    }
+
+    button:hover {
+      border-color: var(--primary-strong);
+      background-color: rgba(8, 85, 95, 0.65);
+      color: rgba(255, 255, 255, 0.95);
+      box-shadow: 0 0 8px rgba(34, 211, 238, 0.4);
+    }
+
+    button:disabled {
+      border-color: rgba(34, 211, 238, 0.15);
+      background-color: rgba(6, 57, 65, 0.2);
+      color: rgba(255, 255, 255, 0.4);
+      cursor: not-allowed;
+      opacity: 0.7;
+    }
+
+    button:disabled:hover {
+      box-shadow: none;
+    }
+
+    .paused {
+      background-color: var(--danger);
+      color: white;
+    }
+
+    .paused:hover {
+      border-color: #b91c1c; /* slightly brighter red */
+      background-color: rgba(120, 10, 10, 0.75); /* stronger red */
+      color: #fecaca; /* softer readable red */
+      box-shadow: 0 0 8px rgba(239, 68, 68, 0.4); /* red glow */
+    }
+
+    .full-width {
+      width: 100%;
+    }
+
+    /* ===================== QR + VIDEO ===================== */
+    #qrCanvas {
+      width: 100% !important;
+      height: 100% !important;
+      aspect-ratio: 1 / 1;
+      border-radius: 16px;
+    }
+
+    #qrVideo {
+      display: block;
+      margin: 5px auto;
+      width: 100%;
+      height: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      background-color: #020617AA;
+      border: 1px solid var(--primary);
+      border-radius: 16px;
+    }
+
+    #qrPopover {
+      width: 95vw;
+    }
+
+    /* ===================== WEBGL ===================== */
+    #webgl-container {
+      height: 80vw;
+      width: 80vw;
+      margin: 20px auto;
+      overflow: hidden;
+      border: 1px solid rgb(47, 47, 47);
+      border-radius: 50%;
+    }
+
+    /* ===================== PEER PAUSE BAR ===================== */
+    #peerPauseBar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      z-index: 20;
+
+      font-size: 12px;
+      font-weight: bold;
+      text-transform: uppercase;
+      color: #f87171;
+
+      background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(239, 68, 68, 0.2),
+        transparent
+      );
+      border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    #peerPauseBar.show-peer-pause {
+      display: flex;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--danger);
+      box-shadow: 0 0 10px var(--danger);
+      animation: pulse 1.5s infinite;
+    }
+
+    .info-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: green;
+      box-shadow: 0 0 10px green;
+      animation: pulse .5s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.5); opacity: 0.4; }
+    }
+
+    /* ===================== LOG ===================== */
+    #log {
+      margin-top: 20px;
+      height: 0;
+    }
+
+   nav {
+    padding: .8em .9em;
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 2em;
+    background-color: var(--bg-card);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(34, 211, 238, 0.3);
+    z-index: 100;
+    overflow: hidden;
+  }
+
+nav img {
+  width: 3em;
+  height: 3em;
+}
+
+nav h1 {
+  font-size: 1em;
+}
+
+.text-primary {
+  color: #22d3ee;
+}
+
+.state-info {
+  margin-left: auto;
+  text-transform: uppercase;
+  font-size: 8px;
+}
+
+.main-cont {
+  padding: 4em 1em 1em 1em;
+}
+
+.conn-type {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: .3em .3em;
+  margin-bottom: 1em;
+  background-color: var(--bg-card);
+  backdrop-filter: blur(10px);
+  border: 1px solid #282B3A;
+  border-radius: 1.2em;
+  z-index: 100;
+}
+
+.reverse-row {
+  flex-direction: row-reverse;
+}
+
+.conn-type > div {
+  padding: .8em;
+  flex-grow: 1;
+  text-align: center;
+  border-radius: 10px;
+  color: #22d3ee;
+  cursor: pointer;
+  font-weight:550;
+  text-transform: uppercase;
+  transition: all .5 ease-in-out;
+}
+
+div.selected {
+  background-color: #22d3ee;
+  color: #151923;
+}
+
+.conn-type > div.disabled {
+  cursor: not-allowed;
+  color: #6C7280;
+}
+
+.node-info {
+  text-transform: uppercase;
+  color: #22d3ee;
+  font-weight: 400;
+  font-size: .7em;
+  text-align: center;
+  margin-bottom: 5em;
+  letter-spacing: .1em;
+  line-height: 1.6em;
+}
+
+#local.card, #localCardFileUpload.card {
+  padding-top: 5px;
+}
+
+body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: 
+        radial-gradient(circle at 50% 0%, rgba(34, 211, 238, 0.1), transparent 70%),
+        linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), 
+        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+      background-size: 100% 100%, 40px 40px, 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+.node-list {
+  list-style: none;
+  display: flex;
+  gap: 24px;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 5px;
+}
+
+.node-list > li {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid #282B3A;;
+  border-radius: 18px;
+  padding: 24px 18px;
+  width: 100%;
+  flex-grow: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+
+.node-list > li .action-text {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 1em;
+  font-size: 1em;
+  letter-spacing: .1em;
+}
+
+#localCardFileUpload.has-file .node-info {
+  margin-bottom: 2em;
+}
+
+.file-upload-cont {
+  background: rgba(255,255,255,0.03);
+  border: 3px dashed #282B3A;
+  border-radius: 18px;
+  padding: 48px 18px;
+  width: 100%;
+  /* cursor: pointer; */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2em;
+  align-items: center;
+}
+
+.has-file .file-upload-cont {
+  border-style: solid;
+  border-width: 1px;
+  padding: 18px;
+  gap: .5em;
+}
+
+.has-file .file-upload-cont .file-upload-heading {
+  color: #22d3ee;
+  font-size: 0;
+}
+
+.file-upload-cont img {
+  width: 64px;
+  transition: 0.3s;
+}
+
+.has-file .file-upload-cont img {
+  width: 24px;
+}
+
+.has-file .file-upload-heading::after {
+  content: none;
+  font-size: 12px;
+  font-weight: 400;
+  content: "Add More...";
+}
+
+.has-file .file-upload-desc {
+  display: none;
+}
+
+.file-upload-cont:active > img {
+  transform: scale(2);
+}
+
+.file-upload-cont > div {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: .5em;
+  align-items: center;
+}
+
+.file-upload-cont .file-upload-heading {
+  font-size: 24px;
+  color: white;
+  letter-spacing: 1px;
+}
+
+.file-upload-cont .file-upload-desc {
+  font-size: 12px;
+  color: #6C7280;
+  letter-spacing: .1em;
+}
+
+.next-btn {
+  margin: 0 auto;
+  border-radius: 12px;
+  padding: 12px 24px;
+  display: flex;
+  gap: 2em;
+  justify-content: center;
+  align-items: center;
+  background: #22d3ee;
+  border: 1px solid #22d3ee;
+  color: #151923;
+  margin-top: 2em;
+  margin-bottom: 1em;
+  opacity: .3;
+  cursor: not-allowed;
+}
+
+.has-file .next-btn {
+  opacity: 1;
+  cursor: default;
+}
+
+.next-btn > .action-text {
+  font-size: 1.2em;
+  font-weight: 600;
+  letter-spacing: .1em; 
+}
+
+.back-btn {
+  position: absolute;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  left: 0;
+  top: -50px;
+  border-radius: 18px;
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  font-size: 1em;
+  color: #22d3ee;
+}
+
+.cancle-btn {
+  position: absolute;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  left: 0;
+  top: -50px;
+  border-radius: 18px;
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  gap: .5em;
+  font-size: 1em;
+  color: #ef4444;
+}
+
+.relative {
+  position: relative;
+}
+
+.hidden {
+  display: none;
+}
+
+#preview .disabled {
+  border-color: rgba(34, 211, 238, 0.15);
+      background-color: rgba(6, 57, 65, 0.5);
+      color: rgba(255, 255, 255, 0.4);
+      cursor: not-allowed;
+      opacity: 0.9;
+}
+
+.transfer-action.hidden {
+  display: none;
+}
+
+    .selection-summary {
+      display: none;
+      background: rgba(103, 232, 249, 0.08);
+      border-radius: 12px;
+      padding: 10px 3em;
+      margin: 16px 0;
+      border: 1px solid rgba(103, 232, 249, 0.15);
+      animation: slideDown 0.3s ease-out;
+      flex-shrink: 0;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .has-file .selection-summary {
+      display: flex;
+    }
+
+    #preview {
+      position: absolute;
+      width: 100%;
+      bottom: 0;
+      animation: slideUpDrastic .3s ease-out backwards;
+    }
+
+    #preview.hidden {
+      animation: slideDownDastric .3s ease-in forwards;
+    }
+
+    @keyframes slideUpDrastic {
+      from { opacity: 0; transform: translateY(50px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes slideDownDastric {
+      from { opacity: 1; transform: translateY(-50px); }
+      to { opacity: 0; transform: translateY(0); }
+    }
+
+    #localFileList, #previewFileList {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: .5em;
+      padding: 0;
+      scrollbar-width: none;
+    }
+
+    #localFileList::-webkit-scrollbar, #previewFileList::-webkit-scrollbar {
+      display: none;
+    }
+
+    .has-file #localFileList {
+      height: 21vh;
+      overflow-y: auto;
+    }
+
+    .has-file #previewFileList {
+      height: 30vh;
+      overflow-y: auto;
+    }
+
+    #localFileList > li, #previewFileList > li {
+      background-color: var(--bg-card);
+      backdrop-filter: blur(10px);
+      border: 1px solid #282B3A;
+      border-radius: 16px;
+      color: white;
+      padding: 10px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      animation: slideUp 0.3s ease-out backwards;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    #localFileList > li > div, #previewFileList > li > div {
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+      /* gap: 5em; */
+    }
+
+    #localFileList > li > div:nth-child(1), #previewFileList > li > div:nth-child(1) {
+      display: flex;
+      justify-content: flex-start;
+      gap: 1em;
+      align-items: center;
+    }
+
+    #localFileList > li > div:nth-child(2) {
+      background-color: #ef444429;
+      padding: 15px;
+      border-radius: 8px;
+    }
+
+    #previewFileList > li > div:nth-child(2) {
+      border: 1px solid #22d3ee;
+      padding: 10px;
+      border-radius: 8px;
+    }
+
+    #localFileList > li > div:nth-child(1) > div:nth-child(1), #previewFileList > li > div:nth-child(1) > div:nth-child(1) {
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.13);
+      padding: 12px;
+    }
+
+    #localFileList > li > div:nth-child(1) > div:nth-child(2), #previewFileList > li > div:nth-child(1) > div:nth-child(2) {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: .4em;
+      font-size: 14px;
+    }
+
+    #localFileList > li > div:nth-child(1) > div:nth-child(2) > span:nth-child(2), #previewFileList > li > div:nth-child(1) > div:nth-child(2) > span:nth-child(2) {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: .8em;
+      font-size: 10px;
+      color: #6C7280;
+    }
+
+    #localFileList > li > div:nth-child(1) > div:nth-child(2) > span:nth-child(2) img, #previewFileList > li > div:nth-child(1) > div:nth-child(2) > span:nth-child(2) img {
+      width: 5px;
+      color: #6C7280;
+    }
+
+    #localFileList > li > div:nth-child(1) > div:nth-child(1) img, #previewFileList > li > div:nth-child(1) > div:nth-child(1) img {
+      width: 12px;
+    }
+
+    .selection-summary > div {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: .5em;
+      align-items: center;
+    }
+
+    .selection-summary span {
+      font-size: .7em;
+      letter-spacing: .8px;
+      font-weight: bold;
+      color: #6C7280;
+    }
+
+    #totalVolSummary, #totalFilesSummary {
+      font-size: .9em;
+      color: #23D3EE;
+      font-weight: 600;
+    }
+
+    .qr-video-container {
+      border: 1px #282B3A solid;
+      border-radius: 16px;
+      padding: 1em;
+      aspect-ratio: 1 / 1;
+    }
+
+    .in-row {
+      display: flex;
+      justify-content: space-between;
+      gap: .5em;
+      align-items: center;
+    }
+
+    .in-row > div {
+      width: 100%;
+    }
+
+.transfer-action {
+  margin: 0 auto;
+  border-radius: 12px;
+  padding: 12px 24px;
+  display: flex;
+  gap: 2em;
+  justify-content: center;
+  align-items: center;
+  background: #22d3ee;
+  border: 1px solid #22d3ee;
+  color: #151923;
+  /* margin-bottom: 1em; */
+  font-size: 1.2em;
+  font-weight: 600;
+  letter-spacing: .1em; 
+}
+
+.shimmer { position: relative; overflow: hidden; }
+    .shimmer::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent); transform: translateX(-100%); animation: shimmer 3s infinite; }
+    @keyframes shimmer { 100% { transform: translateX(100%); } }
+
+    /* Container for the Home Screen */
+.animate-home-in {
+  animation: home-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Container for the Protocol/Transfer Screen */
+.animate-view-in {
+  animation: view-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Slide up and fade in for Home */
+@keyframes home-in {
+  0% { 
+    opacity: 0; 
+    transform: translateY(40px) scale(0.95); 
+  }
+  100% { 
+    opacity: 1; 
+    transform: translateY(0) scale(1); 
+  }
+}
+
+/* Subtle "zoom-out" and blur-clear for the View screens */
+@keyframes view-in {
+  0% { 
+    opacity: 0; 
+    transform: translateY(20px) scale(1.05); 
+    filter: blur(10px); 
+  }
+  100% { 
+    opacity: 1; 
+    transform: translateY(0) scale(1); 
+    filter: blur(0px); 
+  }
+}
+
+.animate-move-left {
+  animation: move-left 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes move-left {
+  0% { 
+    /* opacity: 1; */
+    transform: translateX(100vw); 
+    filter: blur(10px); 
+  }
+  100% { 
+    /* opacity: 0; */
+    transform: translateX(0vw); 
+    filter: blur(0px); 
+  }
+}
+
+  </style>
+
+  <!-- ===================== DEBUG ===================== -->
+  <script src="https://unpkg.com/vconsole@latest/dist/vconsole.min.js"></script>
+  <script>
+    new window.VConsole();
+  </script>
+  <script type="module" crossorigin src="/anuVha/assets/index-BaNAcU7t.js"></script>
+</head>
+
+<body>
+  <nav>
+    <img src="Logo-dark.svg" alt="Logo-dark">
+    <h1><span>ANU</span> <span class="text-primary">VHA</span></h1>
+    <p class="state-info text-primary">STABLE</p>
+  </nav>
+
+  <div class="main-cont">
+    <div id="transferLanding" class="animate-home-in">
+      <div id="connType" class="conn-type">
+        <div id="localType" class="selected">Local</div>
+        <div id="globalType">Global</div>
+      </div>
+      <div id="local" class="card animate-view-in">
+        <p class="node-info">Make sure both devices are on same Wi-Fi or hotspot</p>
+        <ul class="node-list">
+          <li id="sendFileLocal" class="shimmer">
+            <div class="action-text">
+              <img src="upload.svg" width="24px" alt="">
+              <span>Send File</span>
+            </div>
+            <div>
+              <img src="forward.svg" alt="">
+            </div>
+          </li>
+          <li id="recieveFileLocal" class="shimmer">
+            <div class="action-text">
+              <img src="download.svg" width="24px" alt="">
+              <span>Recieve File</span>
+            </div>
+            <div>
+              <img src="forward.svg" alt="">
+            </div>
+          </li>
+        </ul>
+      </div>
+      <div id="global" class="card hidden animate-view-in">
+        <!-- <p class="node-info">Make sure both devices are on same Wi-Fi or hotspot</p> -->
+        <ul class="node-list">
+          <li id="sendFileGlobal" class="shimmer">
+            <div class="action-text">
+              <img src="upload.svg" width="24px" alt="">
+              <span>Send File</span>
+            </div>
+            <div>
+              <img src="forward.svg" alt="">
+            </div>
+          </li>
+          <li id="recieveFileGlobal" class="shimmer">
+            <div class="action-text">
+              <img src="download.svg" width="24px" alt="">
+              <span>Recieve File</span>
+            </div>
+            <div>
+              <img src="forward.svg" alt="">
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+    <div id="localCardFileUpload" class="card animate-home-in">
+      <div id="localFileUploadBackBtn" class="back-btn"><img src="back.svg" width="8px" alt=""> <span>Back</span></div>
+      <p class="node-info">Make sure both devices are on same Wi-Fi or hotspot</p>
+      <input id="localFileInput" type="file" multiple hidden>
+      <div id="localFileDrpzn" class="file-upload-cont shimmer">
+          <img src="folder.svg" width="64px" alt="">
+          <div>
+            <span class="file-upload-heading">Select Files</span>
+            <span class="file-upload-desc">Tap to choose from your device</span>
+          </div>
+      </div>
+      <div class="selection-summary">
+        <div>
+          <span>TOTAL VOLUME</span>
+          <span id="totalVolSummary"></span>
+        </div>
+        <div>
+          <span>TOTAL FILES</span>
+          <span id="totalFilesSummary"></span>
+        </div>
+      </div>
+      <ul id="localFileList">
+      </ul>
+      <div id="localFileUploadNextBtn" class="next-btn">
+        <div class="action-text">
+            <span>Next</span>
+        </div>
+      </div>
+    </div>
+    <div id="qrExchangeCard" class="animate-home-in">
+      <div id="qrExchangeBackBtn" class="back-btn"><img src="back.svg" width="8px" alt=""> <span>Back</span></div>
+      <div id="qrExchangeChoose" class="conn-type">
+        <div id="showQr" class="selected">SHOW QR</div>
+        <div id="scanQr">SCAN QR</div>
+      </div>
+      <div id="showQrCard" class="card animate-view-in">
+        <p class="node-info">Make sure both devices are on same Wi-Fi or hotspot</p>
+        <div class="qr-video-container">
+          <canvas id="qrCanvas"></canvas>
+        </div>
+      </div>
+
+      <div id="scanQrCard" class="card animate-view-in hidden">
+        <p class="node-info">Make sure both devices are on same Wi-Fi or hotspot</p>
+        <div class="qr-video-container">
+          <video id="qrVideo" autoplay></video>
+        </div>
+      </div>
+    </div>
+    <div id="localCardFileTransfer" class="card animate-home-in">
+      <div id="transferCancleBtn" class="cancle-btn"><img src="cross.svg" width="10px" alt=""> <span>Cancle</span></div>
+      <div id="peerPauseBar">
+        <p class="status-dot"></p>
+        <span id="peerPauseText">Paused by sender</span>
+      </div>
+
+      <div id="webgl-container"></div>
+
+      <div class="info-sec">
+        <div class="sub-card">
+          <p class="top-heading">Uploading</p>
+          <p class="description" id="uploadProgress"></p>
+        </div>
+
+        <div class="sub-card">
+          <p class="top-heading">File Size</p>
+          <p class="description" id="fileSize" style="color:#C084FC;"></p>
+        </div>
+
+        <div class="sub-card">
+          <p class="top-heading">Upload Rate</p>
+          <p class="description" id="uploadRate" style="color:#ef60b1;"></p>
+        </div>
+      </div>
+
+      <div class="in-row has-file relative">
+        <div id="pauseToggle" class="transfer-action">Pause</div>
+        <div id="preview" class="card">
+          <div class="selection-summary">
+            <div>
+              <span>TOTAL VOLUME</span>
+              <span id="previewVolSummary"></span>
+            </div>
+            <div>
+              <span>TOTAL FILES</span>
+              <span id="previewFilesSummary"></span>
+            </div>
+          </div>
+          <ul id="previewFileList">
+            
+          </ul>
+          <div class="in-row">
+            <div id="downloadBtn" class="transfer-action">Download</div>
+            <div id="previewBackBtn" class="transfer-action">Back</div>
+          </div>
+        </div>
+        <div id="previewBtn" class="transfer-action">Preview</div>
+      </div>
+    </div>
+    <input id="test" type="file" hidden>
+    <div id="testBtn">Test File</div>
+  </div>
+  
+  <!-- ===================== LOG ===================== -->
+  <div id="log"></div>
+
+  <!-- ===================== SCRIPTS ===================== -->
+
+  <script>
+    function log(msg) {
+      const container = document.getElementById('log');
+      const p = document.createElement('p');
+      p.textContent = msg;
+      container.appendChild(p);
+    }
+
+    window.log = log;
+  </script>
+</body>
+</html>
