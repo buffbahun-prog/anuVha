@@ -1,8 +1,10 @@
 import { createPeerConnection } from "./webrtc";
-import { RecieveState, type ChunkAck, type ChunkPayload, type DataPayload, type FileInfo, type PauseStatus, type Sample, type Status, type TransferEvents } from "../types";
+import { DataPayloadType, RecieveState, StatusType, type ChunkAck, type ChunkPayload, type DataPayload, type FileInfo, type FileMetadata, type PauseStatus, type Sample, type Status, type TransferEvents } from "../types";
 import { base64ToArrayBuffer, base64ToUint8, calculateSpeed, compressJSON, createChunkBitmap, cryptoKeyToBase64, decompressJSON, importECDSAPublicKey, isBitmapComplete, isChunkReceived, setChunkReceived } from "../utils/convert";
 import { decryptVerifyDecompress, generateEncryptionKeyPair } from "../crypto/encryption";
 import { TypedEmitter } from "./emmiter";
+import { decodeChunkPayload, decodeFileMetadataList, decodePauseStatus, decodeStatusMessage, encodeDataPayload } from "./transfer";
+import { calculateFileHash, verifyFileHash } from "../crypto/hasher";
 
 
 export class Reciever extends TypedEmitter<TransferEvents> {
@@ -32,8 +34,8 @@ export class Reciever extends TypedEmitter<TransferEvents> {
   private pauseState: PauseStatus = {
       pause: false,
       from: "reciever",
-      resumeFromFileIndex: 0,
-      resumeFromChunkIndex: 0,
+      resumeFromFileId: 0,
+      resumeFromChunkId: 0,
   };
 
   private chunksBitmapArray: Uint8Array[] | null = null;
@@ -44,6 +46,7 @@ export class Reciever extends TypedEmitter<TransferEvents> {
 
     this.pc.ondatachannel = (event) => {
       this.dataChannel = event.channel;
+      this.dataChannel.binaryType = "arraybuffer";
       this.setupChannel();
     }
   }
@@ -51,7 +54,7 @@ export class Reciever extends TypedEmitter<TransferEvents> {
   private setupChannel() {
     if (!this.dataChannel) throw new Error("data channel not initialized properly.");
     this.dataChannel.onmessage = async (event) => {
-      const dataPayload = JSON.parse(event.data) as DataPayload;
+      const dataPayload = new Uint8Array(event.data);
       this.onDataMessageRecieve(dataPayload);
     };
 
@@ -98,7 +101,7 @@ export class Reciever extends TypedEmitter<TransferEvents> {
     await this.initConnection();
   }
 
-  private setState(state: RecieveState) {
+  private async setState(state: RecieveState) {
     if (state === this.recieveState) return;
     this.recieveState = state;
     this.emit("stateChange", {state: state});
@@ -113,9 +116,20 @@ export class Reciever extends TypedEmitter<TransferEvents> {
       } case RecieveState.Paused: {
         return;
       } case RecieveState.Completed: {
-        if (this.isChunksTransferComplete() && this.opfsRoot) {
+        console.log("here");
+        if (this.isChunksTransferComplete() && this.opfsRoot && this.filesInfo) {
+          await this.closeWriteStream();
+          for (const info of this.filesInfo) {
+            const fileHandle = await this.opfsRoot.getFileHandle(info.name);
+            const file = await fileHandle.getFile();
+            const hasSameHash = await verifyFileHash(file, info.fileHash);
+            if (!hasSameHash) {
+              console.error(file.name, "No Hash match");
+            this.emit("error", new Error(`File hash not matched: ${file.name}`));
+            return;
+            }
+          }
           this.emit("complete", {opfs: this.opfsRoot})
-          this.closeWriteStream();
         }
       }
     }
@@ -130,8 +144,9 @@ export class Reciever extends TypedEmitter<TransferEvents> {
 
   private async recieverEncryptionKeySend() {
       if (!this.localKeys) throw new Error("local keys pair not set.");
-      const recieverPub = await cryptoKeyToBase64(this.localKeys.publicKey);
-      await this.sendUntilAck("recipientEncryptionKey", recieverPub, () => this.recieverKeyAck);
+      const keyBuffer = await crypto.subtle.exportKey("spki", this.localKeys.publicKey);
+      const recieverPub = new Uint8Array(keyBuffer);
+      await this.sendUntilAck(DataPayloadType.RecipientEncryptionKey, recieverPub, () => this.recieverKeyAck);
   }
 
   private async sendUntilAck(type: DataPayload["type"], payload: DataPayload["data"], checkAck: () => boolean) {
@@ -141,7 +156,12 @@ export class Reciever extends TypedEmitter<TransferEvents> {
     while (retries < MAX_RETRIES) {
       if (checkAck()) return;
       if (this.dataChannel.readyState !== "open") return;
-      this.dataChannel.send(JSON.stringify({ type, data: payload }));
+      const packet = encodeDataPayload({
+        type: type,
+        data: payload,
+      } as DataPayload);
+      if (!packet) return;
+      this.dataChannel.send(packet.buffer as ArrayBuffer);
       const delay = 300 * Math.pow(2, retries);
       await new Promise((r) => setTimeout(r, delay));
       retries++;
@@ -150,16 +170,18 @@ export class Reciever extends TypedEmitter<TransferEvents> {
     throw new Error("Ack timeout");
   }
 
-  private async onSenderKeyMessage(senderKey: string) {
+  private async onSenderKeyMessage(senderKey: Uint8Array) {
     if (!this.dataChannel) throw new Error("data channel not initialized properly.");
     this.senderKey = await importECDSAPublicKey(senderKey);
-    this.dataChannel.send(JSON.stringify({ type: "status", data: { ok: true, type: "senderSigningKey" } as Status }));
+    const packet = encodeDataPayload({ type: DataPayloadType.Status, data: { ok: true, type: StatusType.SenderSigningKey } });
+    if (!packet) return;
+    this.dataChannel.send(packet.buffer as ArrayBuffer);
   }
 
   onLocalPause(isPaused: boolean) {
     this.pauseState.pause = isPaused;
-    this.pauseState.resumeFromFileIndex = this.currentFileIndex;
-    this.pauseState.resumeFromChunkIndex = this.currentChunkIndex;
+    this.pauseState.resumeFromFileId = this.currentFileIndex;
+    this.pauseState.resumeFromChunkId = this.currentChunkIndex;
     this.pauseInfoSend();
     if (isPaused === true) {
       this.setState(RecieveState.Paused);
@@ -175,7 +197,9 @@ export class Reciever extends TypedEmitter<TransferEvents> {
 
   private onRemotePause(remotePauseInfo: PauseStatus) {
     if (!this.dataChannel) throw new Error("data channel not initialized properly.");
-    this.dataChannel.send(JSON.stringify({type: "status", data: {ok: true, type: "pause"}}))
+    const packet = encodeDataPayload({type: DataPayloadType.Status, data: {ok: true, type: StatusType.Pause}});
+    if (!packet) return;
+    this.dataChannel.send(new Uint8Array(packet).buffer);
     this.emit("pause", {
       by: "remote",
       paused: remotePauseInfo.pause,
@@ -189,26 +213,30 @@ export class Reciever extends TypedEmitter<TransferEvents> {
       by: "local",
       paused: pauseInfo.pause,
     });
-    this.sendUntilAck("pauseInfo", pauseInfo, () => this.localPauseAck);
+    this.sendUntilAck(DataPayloadType.PauseInfo, pauseInfo, () => this.localPauseAck);
   }
 
-  private async onDataMessageRecieve(dataPayload: DataPayload) {
-    const {data, type} = dataPayload;
+  private async onDataMessageRecieve(dataPayload: Uint8Array) {
+    const type = dataPayload[0];
+    const data = dataPayload.subarray(1);
     switch (type) {
-      case "senderSigningKey": {
-        await this.onSenderKeyMessage(data as string);
+      case DataPayloadType.SenderSigningKey: {
+        await this.onSenderKeyMessage(data);
         break;
-      } case "fileInfo": {
-        this.onFileInfoRecieved(data as FileInfo[]);
+      } case DataPayloadType.FileInfo: {
+        const decoded = decodeFileMetadataList(data);
+        this.onFileInfoRecieved(decoded);
         break;
-      } case "pauseInfo": {
-        this.onRemotePause(data as PauseStatus);
+      } case DataPayloadType.PauseInfo: {
+        const decoded = decodePauseStatus(data);
+        this.onRemotePause(decoded);
         return;
-      } case "chunk": {
-        this.onChunkRecieve(data as ChunkPayload);
+      } case DataPayloadType.Chunk: {
+        const decoded = decodeChunkPayload(data);
+        this.onChunkRecieve(decoded);
         return;
-      } case "status": {
-        const statusMessage = data as Status;
+      } case DataPayloadType.Status: {
+        const statusMessage = decodeStatusMessage(data);
         if (!statusMessage.ok) return;
         this.onStatusMessage(statusMessage.type);
         return;
@@ -220,15 +248,17 @@ export class Reciever extends TypedEmitter<TransferEvents> {
 
   private onStatusMessage(type: Status["type"]) {
     switch (type) {
-      case "recipientEncryptionKey": {
+      case StatusType.RecipientEncryptionKey: {
         this.recieverKeyAck = true;
         break;
-      } case "pause": {
+      } case StatusType.Pause: {
         this.localPauseAck = true;
         return;
-      } case "complete": {
+      } case StatusType.Complete: {
         this.setState(RecieveState.Completed);
-        this.dataChannel?.send(JSON.stringify({type: "status", data: {type: "complete", ok: true}} as DataPayload))
+        const packet = encodeDataPayload({type: DataPayloadType.Status, data: {type: StatusType.Complete, ok: true}});
+        if (!packet) return;
+        this.dataChannel?.send(packet.buffer as ArrayBuffer)
         return;
       }
     }
@@ -241,13 +271,20 @@ export class Reciever extends TypedEmitter<TransferEvents> {
     }
   }
 
-  private async onFileInfoRecieved(infoList: FileInfo[]) {
+  private async onFileInfoRecieved(infoList: FileMetadata[]) {
     if (!this.dataChannel) throw new Error("All info before file init not fulfilled.")
     if (!infoList.length) return;
     this.fileWriters = new Array(infoList.length);
     this.opfsRoot = await navigator.storage.getDirectory();
-    this.dataChannel.send(JSON.stringify({type: "status", data: {ok: true, type: "fileInfo"}}));
-    this.filesInfo = infoList;
+    this.filesInfo = infoList.map(infoLst => ({
+                  name: infoLst.fileInfo.fileName,
+                  total: infoLst.totalChunks,
+                  fileSize: infoLst.fileInfo.fileSize,
+                  fileType: infoLst.fileInfo.fileType,
+                  fileId: infoLst.fileId,
+                  ephemeralPublicKey: infoLst.ephemeralPublicKey,
+                  fileHash: infoLst.rootHash,
+                }));
     
     // 2. Prepare the Disk Writers for each file
     for (const info of this.filesInfo) {
@@ -255,10 +292,14 @@ export class Reciever extends TypedEmitter<TransferEvents> {
       this.fileWriters[info.fileId] = await fileHandle.createWritable({ keepExistingData: true });
     }
 
+    const packet = encodeDataPayload({type: DataPayloadType.Status, data: {ok: true, type: StatusType.FileInfo}});
+    if (!packet) return;
+    this.dataChannel.send(new Uint8Array(packet).buffer);
+
     this.initChunksBitmap();
     
     this.emit("fileInfo", {
-      files: infoList
+      files: this.filesInfo
     });
   }
 
@@ -272,25 +313,34 @@ export class Reciever extends TypedEmitter<TransferEvents> {
 
     if (!this.dataChannel || !this.chunksBitmapArray || !this.senderKey || !this.localKeys || !this.filesInfo || !this.fileWriters ) throw new Error("All info before file recieve not fulfilled.")
 
-    if (isChunkReceived(this.chunksBitmapArray, chunk.fileId, chunk.index)) {
+      const chunkInfo: ChunkAck = {
+      fileId: chunk.fileId,
+      chunkId: chunk.chunkId,
+    }
+
+    const chunkAckPacket = encodeDataPayload({
+      type: DataPayloadType.ChunkAck,
+      data: chunkInfo
+    });
+    if (chunkAckPacket) this.dataChannel.send(new Uint8Array(chunkAckPacket).buffer);
+    
+    if (isChunkReceived(this.chunksBitmapArray, chunk.fileId, chunk.chunkId)) {
       return;
     }
     
       const decrypted = await decryptVerifyDecompress(
-      this.senderKey,
       this.localKeys,
       {
-        ciphertext: base64ToArrayBuffer(chunk.ciphertext),
-        iv: base64ToUint8(chunk.iv),
-        signature: base64ToArrayBuffer(chunk.signature),
-        ephemeralPublicKey: base64ToArrayBuffer(chunk.ephemeralPublicKey)
+        ciphertext: new Uint8Array(chunk.ciphertext).buffer,
+        iv: chunk.iv,
+        ephemeralPublicKey: new Uint8Array(this.filesInfo[chunk.fileId].ephemeralPublicKey).buffer
       }
       );
 
       this.currentFileIndex = chunk.fileId;
-      this.currentChunkIndex = chunk.index;
+      this.currentChunkIndex = chunk.chunkId;
 
-      const offset = chunk.index * Reciever.CHUNK_SIZE;
+      const offset = chunk.chunkId * Reciever.CHUNK_SIZE;
 
       await this.fileWriters[chunk.fileId].write({
         type: "write",
@@ -298,29 +348,18 @@ export class Reciever extends TypedEmitter<TransferEvents> {
         data: decrypted.buffer as ArrayBuffer // Cast to satisfy TS
       });
 
-
-    const chunkInfo: ChunkAck = {
-      fileId: chunk.fileId,
-      chunkId: chunk.index,
-    }
-
-    this.dataChannel.send(JSON.stringify({
-      type: "chunkAck",
-      data: chunkInfo
-    } as DataPayload));
-
     this.updateChunkBitmap(chunkInfo);
       
     this.recieved++;
 
     const fileInfo = this.filesInfo[chunk.fileId];
     // Update pause indices
-    if (chunk.index + 1 >= fileInfo.total) {
-      this.pauseState.resumeFromFileIndex = chunk.fileId + 1;
-      this.pauseState.resumeFromChunkIndex = 0;
+    if (chunk.chunkId + 1 >= fileInfo.total) {
+      this.pauseState.resumeFromFileId = chunk.fileId + 1;
+      this.pauseState.resumeFromChunkId = 0;
     } else {
-      this.pauseState.resumeFromFileIndex = chunk.fileId;
-      this.pauseState.resumeFromChunkIndex = chunk.index + 1;
+      this.pauseState.resumeFromFileId = chunk.fileId;
+      this.pauseState.resumeFromChunkId = chunk.chunkId + 1;
     }
 
     this.samples.push({

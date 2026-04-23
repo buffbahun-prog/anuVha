@@ -28,20 +28,22 @@ export async function cryptoKeyToBase64(key: CryptoKey): Promise<string> {
   return btoa(binary);
 }
 
-export async function importECDHPublicKey(base64: string) {
+export async function importECDHPublicKey(key: Uint8Array) {
+  const keyBuffer = new Uint8Array(key).buffer;
   return crypto.subtle.importKey(
     "spki",
-    base64ToArrayBuffer(base64),
+    keyBuffer,
     { name: "ECDH", namedCurve: "P-256" },
     true,
     []
   );
 }
 
-export async function importECDSAPublicKey(base64: string) {
+export async function importECDSAPublicKey(key: Uint8Array) {
+  const keyBuffer = new Uint8Array(key).buffer;
   return crypto.subtle.importKey(
     "spki",
-    base64ToArrayBuffer(base64),
+    keyBuffer,
     { name: "ECDSA", namedCurve: "P-256" },
     true,
     ["verify"]

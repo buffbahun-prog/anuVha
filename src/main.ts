@@ -14,7 +14,6 @@ import { ConnectionType, PeerType, TransferState, ViewPage} from "./types";
 import { Sender } from "./core/sender";
 import { Reciever } from "./core/reciever";
 
-
 type FileInfo = {
   fileId: number;
   name: string;
@@ -22,6 +21,11 @@ type FileInfo = {
   fileSize: number;
   fileType: string;
 };
+
+const worker = new Worker(
+  new URL("./core/workers/index.worker.ts", import.meta.url),
+  {  type: "module"}
+)
 
 // ===================== DOM =====================
 const videoScanner = document.getElementById("qrVideo") as HTMLVideoElement;
@@ -47,7 +51,7 @@ function updateUIProgress(progress: number) {
 }
 
 function updateSpeed(bytesPerSec: number) {
-  uploadRateElm.textContent = `${formatFileSize(bytesPerSec)}/s`;
+  uploadRateElm.textContent = `${formatFileSize(bytesPerSec, 0)}/s`;
 }
 
 
@@ -58,7 +62,7 @@ function applyRemotePause(isPause: boolean, by: "reciever" | "sender") {
 
 async function initSender() {
   // 1. Initialize sender
-  const sender = await Sender.initConnection();
+  const sender = await Sender.initConnection(worker);
 
   const anim: UploadAnimation = new UploadAnimation(0, "sender");
 
@@ -300,7 +304,6 @@ async function updatePageUI() {
 
       if (peerType === PeerType.Sender) {
         if (sender === null) sender = await initSender();
-        console.log(fileHandles);
         await sender.initFiles(fileHandles);
       }
 
@@ -458,19 +461,19 @@ localFileUploadBtn.addEventListener("click", async () => {
   }
 });
 
-localFileInputElm.addEventListener("change", (evt) => {
-  const inputTarget = evt.target as HTMLInputElement;
-  const selectedFileList = inputTarget.files;
+// localFileInputElm.addEventListener("change", (evt) => {
+//   const inputTarget = evt.target as HTMLInputElement;
+//   const selectedFileList = inputTarget.files;
   
-  if (!selectedFileList || selectedFileList.length === 0) return;
+//   if (!selectedFileList || selectedFileList.length === 0) return;
 
-  updateLocalFileView();
+//   updateLocalFileView();
 
-  // Reset the input but wrap it in a timeout to let the UI breathe
-  setTimeout(() => {
-    inputTarget.value = '';
-  }, 100);
-});
+//   // Reset the input but wrap it in a timeout to let the UI breathe
+//   setTimeout(() => {
+//     inputTarget.value = '';
+//   }, 100);
+// });
 
 async function removeFile(index: number) {
   fileHandles.splice(index, 1);
@@ -638,8 +641,9 @@ async function scanQRAndReturn(): Promise<string> {
 
     videoScanner.setAttribute("autoplay", "true");
     videoScanner.setAttribute("playsinline", "true"); // iOS fix
-    
-    let stream: MediaStream;
+
+    let stream: MediaStream | null = null;
+
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" }
@@ -650,20 +654,23 @@ async function scanQRAndReturn(): Promise<string> {
     }
 
     videoScanner.srcObject = stream;
-    await videoScanner.play();
 
-    // 🛑 Cleanup
     const stopAll = () => {
       if (stopped) return;
       stopped = true;
 
-      stream.getTracks().forEach(track => track.stop());
+      if (stream) stream.getTracks().forEach(track => track.stop());
       videoScanner.pause();
       videoScanner.srcObject = null;
     };
 
     try {
       if ("BarcodeDetector" in window) {
+
+    await videoScanner.play();
+
+    // 🛑 Cleanup
+    
         //@ts-ignore
         const detector = new BarcodeDetector({ formats: ["qr_code"] });
 
