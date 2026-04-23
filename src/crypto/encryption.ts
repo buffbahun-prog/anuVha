@@ -1,4 +1,4 @@
-import { compressSync, decompressSync } from "fflate";
+// import { compressSync, decompressSync } from "fflate";
 
 // ------------------- KEY MANAGEMENT -------------------
 export async function generateSigningKeyPair(): Promise<CryptoKeyPair> {

@@ -440,7 +440,7 @@ localFileUploadBackBtn.addEventListener("click", () => {
   updatePageUI();
 });
 
-const localFileInputElm = document.getElementById("localFileInput") as HTMLInputElement;
+// const localFileInputElm = document.getElementById("localFileInput") as HTMLInputElement;
 const localFileUploadBtn = document.getElementById("localFileDrpzn") as HTMLDivElement;
 // const files: File[] = [];
 

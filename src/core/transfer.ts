@@ -411,7 +411,7 @@ export async function buildRoot(leafHashes: Uint8Array) {
     return currentLevel[0];
 }
 
-async function getMerkleProof(leafHashes: Uint8Array, index: number) {
+export async function getMerkleProof(leafHashes: Uint8Array, index: number) {
     let nodes = [];
     for (let i = 0; i < leafHashes.length; i += 32) {
         nodes.push(leafHashes.slice(i, i + 32));
@@ -454,7 +454,7 @@ async function getMerkleProof(leafHashes: Uint8Array, index: number) {
     return flatProof;
 }
 
-async function verifyChunk(rootHash: Uint8Array, chunkHash: Uint8Array, flatProof: Uint8Array, index: number) {
+export async function verifyChunk(rootHash: Uint8Array, chunkHash: Uint8Array, flatProof: Uint8Array, index: number) {
     let currentHash = chunkHash;
     const numLevels = flatProof.length / 32;
 

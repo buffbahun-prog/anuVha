@@ -2,7 +2,7 @@ import { encryptJustChunk } from "../../crypto/encryption";
 import { calculateFileHash } from "../../crypto/hasher";
 import { DataPayloadType, WorkerAction, type ChunkPayload, type SenderFileRecord, type WorkerRequest, type WorkerResponse } from "../../types";
 import { getMissingChunks } from "../../utils/convert";
-import { buildRoot, CHUNK_SIZE, encodeDataPayload} from "../transfer";
+import { CHUNK_SIZE, encodeDataPayload} from "../transfer";
 
 let resolveReady: (() => void) | null = null;
 const waitForBackpressureReady = () => new Promise<void>((resolve) => {
@@ -259,6 +259,7 @@ async function processFileToChunks(
   fileHandle: FileSystemFileHandle, 
   chunkId: number,
   fileId: number,
+  //@ts-ignore
   leafHashes: Uint8Array,
   recipientKey: CryptoKey,
   ephemeralKeyPair: CryptoKeyPair,

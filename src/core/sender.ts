@@ -59,7 +59,7 @@ export class Sender extends TypedEmitter<TransferEvents> {
     this.worker = worker;
 
     worker.addEventListener("message", async (ev : MessageEvent<WorkerResponse>) => {
-      const { action, status, result, error } = ev.data;
+      const { action, status, result } = ev.data;
 
       switch (action) {
         case WorkerAction.GetMetadata: {

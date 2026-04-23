@@ -1,10 +1,10 @@
 import { createPeerConnection } from "./webrtc";
 import { DataPayloadType, RecieveState, StatusType, type ChunkAck, type ChunkPayload, type DataPayload, type FileInfo, type FileMetadata, type PauseStatus, type Sample, type Status, type TransferEvents } from "../types";
-import { base64ToArrayBuffer, base64ToUint8, calculateSpeed, compressJSON, createChunkBitmap, cryptoKeyToBase64, decompressJSON, importECDSAPublicKey, isBitmapComplete, isChunkReceived, setChunkReceived } from "../utils/convert";
+import { calculateSpeed, compressJSON, createChunkBitmap, decompressJSON, importECDSAPublicKey, isBitmapComplete, isChunkReceived, setChunkReceived } from "../utils/convert";
 import { decryptVerifyDecompress, generateEncryptionKeyPair } from "../crypto/encryption";
 import { TypedEmitter } from "./emmiter";
 import { decodeChunkPayload, decodeFileMetadataList, decodePauseStatus, decodeStatusMessage, encodeDataPayload } from "./transfer";
-import { calculateFileHash, verifyFileHash } from "../crypto/hasher";
+import { verifyFileHash } from "../crypto/hasher";
 
 
 export class Reciever extends TypedEmitter<TransferEvents> {
@@ -323,7 +323,7 @@ export class Reciever extends TypedEmitter<TransferEvents> {
       data: chunkInfo
     });
     if (chunkAckPacket) this.dataChannel.send(new Uint8Array(chunkAckPacket).buffer);
-    
+
     if (isChunkReceived(this.chunksBitmapArray, chunk.fileId, chunk.chunkId)) {
       return;
     }
