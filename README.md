@@ -43,4 +43,4 @@ ANUVHA is currently a high-performance engine in a functional draft chassis. It 
 
 > **ANUVHA** is about removing the friction between the moments we capture and the tools we use to refine them.
 
-> I should also emphasis this product is not completely bug free and production ready. At this stage just acts as a proof of concept.
+> **I should also emphasis this product is not completely bug free and production ready. At this stage just acts as a proof of concept.**
