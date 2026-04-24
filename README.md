@@ -11,7 +11,7 @@ We were stuck in a loop of installing clunky apps like ShareIt, or worse, the **
 ## System in Action
 | (Sender) | (Receiver) |
 | :--- | :--- |
-| ![Sender Workflow](sender-flow.gif) | ![Receiver Workflow](reciever-flow.gif) |
+| ![Sender Workflow](https://github.com/buffbahun-prog/anuVha/blob/main/public/sender-flow.gif) | ![Receiver Workflow](https://github.com/buffbahun-prog/anuVha/blob/main/public/reciever-flow.gif) |
 ---
 
 ## The Engineering Journey
