@@ -30,6 +30,11 @@ Even though I intended this for local use, I wanted the architecture to be bulle
 
 ---
 
+### 4. Progress-bar animations with Threejs
+Also for fun I have added cube transfer animation with the help of threejs which acts as a progress bar.
+
+---
+
 ## Current State & Roadmap
 ANUVHA is currently a high-performance engine in a functional draft chassis. It is built on the principle of "Mechanical Sympathy"—using the right browser primitives to achieve performance that rivals native applications.
 
@@ -37,3 +42,5 @@ ANUVHA is currently a high-performance engine in a functional draft chassis. It 
 * **PWA Evolution:** My final step is a full **Progressive Web App** implementation to provide a professional, "installable" feel across all devices.
 
 > **ANUVHA** is about removing the friction between the moments we capture and the tools we use to refine them.
+
+> I should also emphasis this product is not completely bug free and production ready. At this stage just acts as a proof of concept.
