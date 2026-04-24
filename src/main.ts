@@ -127,7 +127,6 @@ async function initSender() {
 }
 
 async function initReceiver() {
-  // 1️⃣ Init receiver (protocol + crypto handled internally)
   const receiver = await Reciever.initConnection();
 
   const anim = new UploadAnimation(0, "receiver");
@@ -182,7 +181,6 @@ async function initReceiver() {
     anim.cleanup();
   });
   
-  // 🔟 Pause button (IMPORTANT: use class API, not local state)
   pauseToggleBtn.onclick = () => {
     const nextPause = !receiver['pauseState'].pause;
 
@@ -440,9 +438,7 @@ localFileUploadBackBtn.addEventListener("click", () => {
   updatePageUI();
 });
 
-// const localFileInputElm = document.getElementById("localFileInput") as HTMLInputElement;
 const localFileUploadBtn = document.getElementById("localFileDrpzn") as HTMLDivElement;
-// const files: File[] = [];
 
 // Global state: only store handles, not File objects!
 let fileHandles: FileSystemFileHandle[] = [];
@@ -460,20 +456,6 @@ localFileUploadBtn.addEventListener("click", async () => {
     console.error("User cancelled or browser doesn't support API", err);
   }
 });
-
-// localFileInputElm.addEventListener("change", (evt) => {
-//   const inputTarget = evt.target as HTMLInputElement;
-//   const selectedFileList = inputTarget.files;
-  
-//   if (!selectedFileList || selectedFileList.length === 0) return;
-
-//   updateLocalFileView();
-
-//   // Reset the input but wrap it in a timeout to let the UI breathe
-//   setTimeout(() => {
-//     inputTarget.value = '';
-//   }, 100);
-// });
 
 async function removeFile(index: number) {
   fileHandles.splice(index, 1);
@@ -668,8 +650,6 @@ async function scanQRAndReturn(): Promise<string> {
       if ("BarcodeDetector" in window) {
 
     await videoScanner.play();
-
-    // 🛑 Cleanup
     
         //@ts-ignore
         const detector = new BarcodeDetector({ formats: ["qr_code"] });
